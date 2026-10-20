@@ -31,11 +31,9 @@ class ManifestBuilder:
         Returns:
             List[Path]: Paths to raw data CSV files.
         """
-        # ALGORITHM:
-        # 1. files = list(self.raw_dir.glob("pk_*_weather_*.csv"))
-        # 2. filter out any file where file.name == "manifest.csv"
-        # 3. return files
-        raise NotImplementedError
+        files = list(self.raw_dir.glob("pk_*_weather_*.csv"))
+        files.extend(self.raw_dir.glob("open-meteo-*.csv"))
+        return [f for f in files if f.name != "manifest.csv"]
 
     def build_file_record(self, file_path: Path) -> Dict[str, Any]:
         """
@@ -54,19 +52,17 @@ class ManifestBuilder:
                 - licence: str
                 - row_count: int
         """
-        # ALGORITHM:
-        # 1. sha_hash = self.hasher_service.compute_sha256(file_path)
-        # 2. df = pd.read_csv(file_path, comment="#")
-        # 3. return {
-        #        "filename": file_path.name,
-        #        "source_url": "https://archive-api.open-meteo.com/v1/archive",
-        #        "publisher": "Open-Meteo / PMD Weather Archive",
-        #        "fetch_timestamp_utc": pd.Timestamp.now("UTC").isoformat(),
-        #        "sha256_hash": sha_hash,
-        #        "licence": "CC-BY 4.0 / Open Access",
-        #        "row_count": len(df)
-        #    }
-        raise NotImplementedError
+        sha_hash = self.hasher_service.compute_sha256(file_path)
+        df = self._read_weather_csv(file_path)
+        return {
+            "filename": file_path.name,
+            "source_url": "https://archive-api.open-meteo.com/v1/archive",
+            "publisher": "Open-Meteo / PMD Weather Archive",
+            "fetch_timestamp_utc": pd.Timestamp.now("UTC").isoformat(),
+            "sha256_hash": sha_hash,
+            "licence": "CC-BY 4.0 / Open Access",
+            "row_count": len(df),
+        }
 
     def generate_manifest(self) -> Path:
         """
@@ -76,13 +72,19 @@ class ManifestBuilder:
         Returns:
             Path: Path to created data/raw/manifest.csv
         """
-        # ALGORITHM:
-        # 1. raw_files = self.scan_raw_files()
-        # 2. records = [self.build_file_record(f) for f in raw_files]
-        # 3. df_manifest = pd.DataFrame(records)
-        # 4. df_manifest.to_csv(self.manifest_file, index=False)
-        # 5. return self.manifest_file
-        raise NotImplementedError
+        raw_files = self.scan_raw_files()
+        records = [self.build_file_record(f) for f in raw_files]
+        df_manifest = pd.DataFrame(records)
+        df_manifest.to_csv(self.manifest_file, index=False)
+        return self.manifest_file
+
+    @staticmethod
+    def _read_weather_csv(file_path: Path) -> pd.DataFrame:
+        with file_path.open(encoding="utf-8") as handle:
+            first_line = handle.readline()
+        if first_line.startswith("latitude"):
+            return pd.read_csv(file_path, skiprows=3)
+        return pd.read_csv(file_path, comment="#")
 
 
 if __name__ == "__main__":

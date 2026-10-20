@@ -1,6 +1,7 @@
 """
 Location: pipeline/warehouse_pipeline.py
-Purpose: Reproducible 3-layer DuckDB warehouse pipeline (make data engine).
+Purpose: Reproducible 3-layer DuckDB warehouse engine (make data).
+         Enforces cryptographic verification before populating cleaned and gold tables.
 """
 
 from pathlib import Path
@@ -24,82 +25,148 @@ class DataWarehousePipeline:
     def verify_raw_manifest(self) -> bool:
         """
         LAYER 1 VERIFICATION:
-        Reads manifest.csv and checks SHA-256 for all raw files.
-        If a file was altered or corrupted, raises an exception to halt the pipeline.
+        Reads manifest.csv and validates SHA-256 checksums for all raw files on disk.
+        
+        Returns:
+            bool: True if all raw files pass checksum checks.
+            
+        Raises:
+            FileNotFoundError: If manifest.csv or raw files are missing.
+            ValueError: If a file hash does not match manifest.csv.
         """
-        # ALGORITHM:
-        # 1. Read manifest.csv
-        # 2. For each row in manifest:
-        #        current_hash = hashlib.sha256(open(raw_dir / row.filename, 'rb').read()).hexdigest()
-        #        if current_hash != row.sha256_hash:
-        #            raise ValueError(f"Integrity Compromised: {row.filename}")
-        # 3. Return True if all hashes match
-        raise NotImplementedError
+        if not self.manifest_path.exists():
+            raise FileNotFoundError(f"Missing manifest: {self.manifest_path}")
+
+        df_manifest = pd.read_csv(self.manifest_path)
+        for row in df_manifest.itertuples(index=False):
+            target_file = self.raw_dir / row.filename
+            if not target_file.exists():
+                raise FileNotFoundError(f"Missing raw file: {target_file}")
+            hasher = hashlib.sha256()
+            with target_file.open("rb") as handle:
+                while chunk := handle.read(8192):
+                    hasher.update(chunk)
+            if hasher.hexdigest() != row.sha256_hash:
+                raise ValueError("Checksum Mismatch! File was tampered with.")
+        return True
 
     def build_cleaned_layer(self, conn: duckdb.DuckDBPyConnection) -> None:
         """
         LAYER 2 (CLEANED):
-        Loads verified CSVs into DuckDB table: `cleaned_weather`.
-        - Normalizes column names (timestamp_utc, temperature_c, humidity_pct, wind_speed_ms)
-        - Casts timestamps to ISO UTC
-        - Tags missing values with is_imputed boolean
-        - Tags statistical outliers with is_anomalous boolean
+        Connects to DuckDB and creates the normalized table: `cleaned_weather`.
+        - Standardizes column names
+        - Parses ISO timestamps into UTC timestamps
+        - Converts metrics into 32-bit floats
+        - Initializes is_imputed and is_anomalous tracking booleans
         """
-        # ALGORITHM:
-        # conn.execute("""
-        #     CREATE OR REPLACE TABLE cleaned_weather AS
-        #     SELECT 
-        #         city,
-        #         strptime(time, '%Y-%m-%dT%H:%M')::TIMESTAMP AS timestamp_utc,
-        #         temperature_2m::FLOAT AS temperature_c,
-        #         relative_humidity_2m::FLOAT AS humidity_pct,
-        #         wind_speed_10m::FLOAT AS wind_speed_ms,
-        #         FALSE AS is_imputed,
-        #         FALSE AS is_anomalous
-        #     FROM read_csv_auto('data/raw/pk_*_weather_*.csv', union_by_name=True)
-        # """)
-        raise NotImplementedError
+        frames: List[pd.DataFrame] = []
+        weather_files = [
+            path for path in sorted(self.raw_dir.glob("*.csv"))
+            if path.name != "manifest.csv"
+        ]
+        for path in weather_files:
+            df = self._read_weather_csv(path)
+            df["filename"] = path.name
+            frames.append(df)
+
+        if not frames:
+            raise FileNotFoundError(f"No weather CSVs found in {self.raw_dir}")
+
+        raw = pd.concat(frames, ignore_index=True)
+        renamed = raw.rename(columns=self._column_map(raw.columns))
+        renamed["timestamp_utc"] = pd.to_datetime(renamed["time"], utc=True)
+        cleaned = renamed[[
+            "filename",
+            "timestamp_utc",
+            "temperature_c",
+            "humidity_pct",
+            "wind_speed_kmh",
+        ]].copy()
+        cleaned["temperature_c"] = cleaned["temperature_c"].astype("float32")
+        cleaned["humidity_pct"] = cleaned["humidity_pct"].astype("float32")
+        cleaned["wind_speed_kmh"] = cleaned["wind_speed_kmh"].astype("float32")
+        cleaned["is_imputed"] = False
+        cleaned["is_anomalous"] = False
+
+        conn.register("_cleaned_stage", cleaned)
+        conn.execute("CREATE OR REPLACE TABLE cleaned_weather AS SELECT * FROM _cleaned_stage")
+        conn.unregister("_cleaned_stage")
 
     def build_processed_gold_layer(self, conn: duckdb.DuckDBPyConnection) -> None:
         """
         LAYER 3 (PROCESSED / GOLD):
-        Builds table: `gold_weather_features`.
-        - Generates deterministic row_id = md5(city || timestamp_utc)
-        - Computes time features: hour, day_of_week, is_weekend, month
-        - Computes cyclical features: hour_sin, hour_cos
-        - Computes temporal lag features: lag_1, lag_24, lag_168
-        - Computes moving window stats: rolling_mean_24, rolling_std_24
+        Builds the production-ready feature table: `gold_weather_features`.
+        - Generates immutable primary key: row_id = md5(filename || timestamp_utc)
+        - Computes temporal lag features: temp_lag_1, temp_lag_24, temp_lag_168
+        - Computes rolling statistics: temp_rolling_24 (24-hour moving window)
         """
-        # ALGORITHM:
-        # conn.execute("""
-        #     CREATE OR REPLACE TABLE gold_weather_features AS
-        #     SELECT 
-        #         md5(city || timestamp_utc::VARCHAR) AS row_id,
-        #         city,
-        #         timestamp_utc,
-        #         temperature_c,
-        #         humidity_pct,
-        #         EXTRACT(HOUR FROM timestamp_utc) AS hour,
-        #         EXTRACT(DOW FROM timestamp_utc) AS day_of_week,
-        #         -- Lags using SQL window functions
-        #         LAG(temperature_c, 1) OVER (PARTITION BY city ORDER BY timestamp_utc) AS temp_lag_1,
-        #         LAG(temperature_c, 24) OVER (PARTITION BY city ORDER BY timestamp_utc) AS temp_lag_24,
-        #         LAG(temperature_c, 168) OVER (PARTITION BY city ORDER BY timestamp_utc) AS temp_lag_168,
-        #         -- Rolling 24h average
-        #         AVG(temperature_c) OVER (PARTITION BY city ORDER BY timestamp_utc ROWS BETWEEN 24 PRECEDING AND CURRENT ROW) AS temp_rolling_24
-        #     FROM cleaned_weather
-        # """)
-        raise NotImplementedError
+        conn.execute(
+            """
+            CREATE OR REPLACE TABLE gold_weather_features AS
+            SELECT
+                md5(filename || timestamp_utc::VARCHAR) AS row_id,
+                filename,
+                timestamp_utc,
+                temperature_c,
+                humidity_pct,
+                wind_speed_kmh,
+                EXTRACT(HOUR FROM timestamp_utc) AS hour,
+                EXTRACT(DOW FROM timestamp_utc) AS day_of_week,
+                LAG(temperature_c, 1) OVER (
+                    PARTITION BY filename ORDER BY timestamp_utc
+                ) AS temp_lag_1,
+                LAG(temperature_c, 24) OVER (
+                    PARTITION BY filename ORDER BY timestamp_utc
+                ) AS temp_lag_24,
+                LAG(temperature_c, 168) OVER (
+                    PARTITION BY filename ORDER BY timestamp_utc
+                ) AS temp_lag_168,
+                AVG(temperature_c) OVER (
+                    PARTITION BY filename ORDER BY timestamp_utc
+                    ROWS BETWEEN 24 PRECEDING AND CURRENT ROW
+                ) AS temp_rolling_24
+            FROM cleaned_weather
+            """
+        )
 
     def run_make_data(self) -> None:
-        """Single CLI entry-point rebuilding the entire storage engine."""
-        # 1. self.verify_raw_manifest()
-        # 2. conn = duckdb.connect(str(self.db_path))
-        # 3. self.build_cleaned_layer(conn)
-        # 4. self.build_processed_gold_layer(conn)
-        # 5. conn.close()
-        # 6. print("✅ DuckDB warehouse successfully rebuilt via make data!")
-        raise NotImplementedError
+        """
+        Master CLI command coordinating the make data lifecycle from scratch.
+        """
+        self.verify_raw_manifest()
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = duckdb.connect(str(self.db_path))
+        try:
+            self.build_cleaned_layer(conn)
+            self.build_processed_gold_layer(conn)
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _read_weather_csv(file_path: Path) -> pd.DataFrame:
+        for encoding in ("utf-8", "utf-8-sig", "latin-1"):
+            try:
+                with file_path.open(encoding=encoding) as handle:
+                    first_line = handle.readline()
+                if first_line.startswith("latitude"):
+                    return pd.read_csv(file_path, skiprows=3, encoding=encoding)
+                return pd.read_csv(file_path, comment="#", encoding=encoding)
+            except UnicodeDecodeError:
+                continue
+        raise ValueError(f"Could not decode weather CSV: {file_path}")
+
+    @staticmethod
+    def _column_map(columns: pd.Index) -> Dict[str, str]:
+        mapping: Dict[str, str] = {}
+        for column in columns:
+            name = str(column).lower()
+            if "temp" in name:
+                mapping[column] = "temperature_c"
+            elif "humid" in name:
+                mapping[column] = "humidity_pct"
+            elif "wind" in name:
+                mapping[column] = "wind_speed_kmh"
+        return mapping
 
 
 if __name__ == "__main__":

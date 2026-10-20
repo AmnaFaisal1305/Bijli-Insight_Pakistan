@@ -1,0 +1,4 @@
+filename,source_url,publisher,fetch_timestamp_utc,sha256_hash,licence,row_count
+open-meteo-24.85N66.99E7m.csv,https://archive-api.open-meteo.com/v1/archive,Open-Meteo / PMD Weather Archive,2026-10-20T20:25:33.617481+00:00,1f70aced82c68ee0e310c99fbc735398405a6d5e6d8e658a4d1e879b5c771e1c,CC-BY 4.0 / Open Access,17544
+open-meteo-31.53N74.39E220m.csv,https://archive-api.open-meteo.com/v1/archive,Open-Meteo / PMD Weather Archive,2026-10-20T20:25:33.640470+00:00,b239a190af758110995943d3163020f12e889c8f5812ca1debaf9514ac4efa79,CC-BY 4.0 / Open Access,17544
+open-meteo-33.64N73.03E527m.csv,https://archive-api.open-meteo.com/v1/archive,Open-Meteo / PMD Weather Archive,2026-10-20T20:25:33.663454+00:00,25d4a3818da329f5504efaf400d81bb5b9979657f0d336ce52a660f3bd59a828,CC-BY 4.0 / Open Access,17544

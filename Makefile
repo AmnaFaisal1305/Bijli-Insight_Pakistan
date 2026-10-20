@@ -8,7 +8,7 @@ data:
 
 # 2. Run all unit tests and contract assertions
 test:
-	pytest tests/ -v
+	python -m pytest tests/ -v
 
 # 3. Execute one cycle of the hourly pipeline
 pipeline:

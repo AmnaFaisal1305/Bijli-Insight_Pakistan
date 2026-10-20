@@ -58,13 +58,11 @@ class PakistanDataFetcher:
 
     def compute_sha256(self, file_path: Path) -> str:
         """Computes the 64-character SHA-256 cryptographic checksum."""
-        # ALGORITHM:
-        # 1. hasher = hashlib.sha256()
-        # 2. with open(file_path, "rb") as f:
-        #        while chunk := f.read(8192):
-        #            hasher.update(chunk)
-        # 3. return hasher.hexdigest()
-        raise NotImplementedError
+        hasher = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            while chunk := f.read(8192):
+                hasher.update(chunk)
+        return hasher.hexdigest()
 
     def generate_manifest_record(self, file_path: Path, source_url: str) -> Dict[str, Any]:
         """Creates an audit entry for manifest.csv with hash, row count, and license."""
