@@ -1,7 +1,7 @@
 {
-  "last_run_utc": "2026-10-21 17:58 UTC",
+  "last_run_utc": "2026-10-21 18:23 UTC",
   "status": "SUCCESS",
-  "data_freshness_minutes": 58,
+  "data_freshness_minutes": 23,
   "model_mae": 0.4023,
   "baseline_mae": 1.8795,
   "improvement_pct": 78.59,
