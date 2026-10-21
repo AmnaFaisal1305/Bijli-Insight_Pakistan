@@ -163,6 +163,7 @@ nav{flex-direction:row;overflow-x:auto}nav a{white-space:nowrap}
 .radio{flex-direction:row;flex-wrap:wrap}
 }
 @media (prefers-reduced-motion:no-preference){.view.on{animation:in .25s ease-out}@keyframes in{from{opacity:.4}to{opacity:1}}}
+.md h3{font-size:1rem;margin:.7em 0 .3em}.md ul{margin:.3em 0;padding-left:1.2em}.md p{margin:.4em 0}.md blockquote{margin:.4em 0;padding-left:.8em;border-left:3px solid currentColor;opacity:.85}
 </style>
 </head>
 <body>
@@ -270,6 +271,8 @@ nav{flex-direction:row;overflow-x:auto}nav a{white-space:nowrap}
 <dialog id="cmd"><input id="cmdq" placeholder="Go to a page, switch city, or toggle theme" aria-label="Search commands"><div id="cmdl"></div></dialog>
 <div class="toast" id="toast" role="status"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
 <script>
 const $=s=>document.querySelector(s);
 const API=(['localhost','127.0.0.1',''].includes(location.hostname))?'http://localhost:8000':'https://bijli-insight-api.onrender.com';
@@ -437,6 +440,7 @@ try{const s=localStorage.getItem('bi-city');if(s!==null&&$('#city').options[+s])
 $('#city').addEventListener('change',()=>{try{localStorage.setItem('bi-city',$('#city').selectedIndex)}catch(e){}});
 
 // policy assistant (real RAG)
+const md=t=>window.marked&&window.DOMPurify?DOMPurify.sanitize(marked.parse(t||'')):String(t||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])).replace(/\n/g,'<br>');
 async function ask(t){if(!t.trim())return;
  const c=$('#chat');
  c.insertAdjacentHTML('beforeend',`<div class="msg u"><div class="bb"></div></div>`);
@@ -449,8 +453,8 @@ async function ask(t){if(!t.trim())return;
   $('#typing').remove();
   const chips=d.fallback
    ?`<div class="chips"><span class="chip a">No matching source · Fallback triggered: yes</span></div>`
-   :`<div class="chips"><span class="chip g">Source: ${d.source}</span><span class="chip b">Confidence ${d.confidence} · Fallback triggered: no</span></div>`;
-  c.insertAdjacentHTML('beforeend',`<div class="msg b"><span class="av s">AI</span><div class="bb"><b>Policy advisory</b><br>${d.answer}${chips}</div></div>`);
+   :`<div class="chips"><span class="chip g">Source: ${d.source}</span><span class="chip b">Fallback triggered: no</span></div>`;
+  c.insertAdjacentHTML('beforeend',`<div class="msg b"><span class="av s">AI</span><div class="bb"><b>Policy advisory</b><div class="md">${md(d.answer)}</div>${chips}</div></div>`);
  }catch(e){
   $('#typing').remove();
   c.insertAdjacentHTML('beforeend',`<div class="msg b"><span class="av s">AI</span><div class="bb">Service temporarily unavailable. Please try again.</div></div>`);
