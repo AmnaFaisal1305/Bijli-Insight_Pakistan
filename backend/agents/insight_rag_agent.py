@@ -317,8 +317,9 @@ class InsightAgentRAG:
         return {
             "narrative_explanation": (
                 "### Direct Answer\n\n"
-                "The currently verified evidence is not sufficient "
-                "to answer this question.\n\n"
+                "I don't know based on the currently verified "
+                "evidence; it is not sufficient to answer this "
+                "question.\n\n"
                 "### Recommendation\n\n"
                 "- Consult the relevant official **NEECA** or "
                 "**NEPRA** documentation.\n"
