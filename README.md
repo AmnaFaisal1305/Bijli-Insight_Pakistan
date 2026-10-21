@@ -1,15 +1,3 @@
----
-title: Bijli-Insight Pakistan
-emoji: ⚡
-colorFrom: green
-colorTo: blue
-sdk: streamlit
-sdk_version: 1.39.0
-app_file: frontend/app.py
-pinned: false
-license: mit
----
-
 # Bijli-Insight Pakistan · بجلی بصیرت پاکستان
 
 **National Energy Intelligence & Quantile Load Forecasting System**
