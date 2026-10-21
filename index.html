@@ -218,7 +218,8 @@ canvas{display:block;cursor:grab}canvas:active{cursor:grabbing}
 .entry.q .t{font-weight:600}
 .entry .src{grid-column:2;display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;font-size:12.5px}
 .tag{border:1px solid currentColor;padding:1px 8px;font-weight:600}
-.tag.ok{color:var(--green-ink)}.tag.no{color:var(--alert)}
+.tag.ok{color:var(--green-ink)}.tag.no{color:var(--alert)}.tag.web{color:var(--ink)}
+.entry .wsrc{grid-column:2;margin:6px 0 0;padding-left:18px;font-size:12.5px}.entry .wsrc li{margin:2px 0}.entry .wsrc small{color:var(--muted,inherit);opacity:.8}
 .md h3{font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;margin:.9em 0 .3em;font-variation-settings:"wdth" 80}
 .md h3:first-child{margin-top:0}
 .md ul{margin:.3em 0;padding-left:1.1em}.md p{margin:.4em 0;max-width:72ch}.md li{margin:.2em 0}
@@ -659,10 +660,12 @@ $('#city').addEventListener('change',()=>{try{localStorage.setItem('bi-city',$('
 const md=t=>window.marked&&window.DOMPurify?DOMPurify.sanitize(marked.parse(t||'')):esc(t).replace(/\n/g,'<br>');
 async function ask(t){if(!t.trim())return;const c=$('#chat');
  c.insertAdjacentHTML('beforeend',`<div class="entry q"><span class="k">Q</span><div class="t"></div></div>`);c.lastElementChild.querySelector('.t').textContent=t;
- c.insertAdjacentHTML('beforeend',`<div class="entry" id="typing"><span class="k">A</span><div class="t wait">Searching NEECA and NEPRA documents</div></div>`);c.scrollTop=c.scrollHeight;$('#q').value='';
+ c.insertAdjacentHTML('beforeend',`<div class="entry" id="typing"><span class="k">A</span><div class="t wait">Searching documents, then the web if needed</div></div>`);c.scrollTop=c.scrollHeight;$('#q').value='';
  try{const r=await fetch(`${API}/api/chat`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:t})});const d=await r.json();$('#typing').remove();
-  const src=d.fallback?`<span class="tag no">No matching source · answered "I don't know"</span>`:`<span class="tag ok">Grounded</span><span>Sources: <b>${esc(d.source)}</b></span>`;
-  c.insertAdjacentHTML('beforeend',`<div class="entry"><span class="k">A</span><div class="t md">${md(d.answer)}</div><div class="src">${src}</div></div>`)}
+  const p=d.pathway||(d.fallback?'insufficient':'documents'),docs=d.source?`<span>Documents: <b>${esc(d.source)}</b></span>`:'';
+  const src={documents:`<span class="tag ok">Project documents</span>${docs}`,web:`<span class="tag web">Web research</span>`,'documents+web':`<span class="tag web">Documents + web research</span>${docs}`,off_topic:`<span class="tag no">Out of scope</span>`}[p]||`<span class="tag no">Insufficient evidence</span>`;
+  const ws=(d.web_sources||[]).filter(w=>/^https?:\/\//i.test(w.url)).map((w,i)=>`<li><a href="${esc(w.url)}" target="_blank" rel="noopener noreferrer">${esc(w.title)}</a> <small>${esc(new URL(w.url).hostname)}${w.published_date?' · '+esc(String(w.published_date).slice(0,10)):''}${w.official?' · Official':''}</small></li>`).join('');
+  c.insertAdjacentHTML('beforeend',`<div class="entry"><span class="k">A</span><div class="t md">${md(d.answer)}</div><div class="src">${src}</div>${ws?`<ol class="wsrc">${ws}</ol>`:''}</div>`)}
  catch(e){$('#typing').remove();c.insertAdjacentHTML('beforeend',`<div class="entry"><span class="k" style="color:var(--alert)">ERR</span><div class="t">The advisor did not respond. The backend may be waking up; try again in a minute.</div></div>`)}
  c.scrollTop=c.scrollHeight}
 $('#send').onclick=()=>ask($('#q').value);$('#q').onkeydown=e=>{if(e.key==='Enter')ask(e.target.value)};

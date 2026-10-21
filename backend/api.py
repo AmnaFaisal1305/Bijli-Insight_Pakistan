@@ -188,13 +188,14 @@ async def chat(body: dict):
     question = body.get("question", "").strip()
     if not question:
         return {"answer": "Please ask a question.", "source": "", "confidence": "0%", "fallback": True}
-    ctx    = rag_agent.retrieve_grounding_context(question)
-    result = rag_agent.synthesize_verified_advice(question, ctx)
+    result = rag_agent.answer(question)
     sources = [c["document_title"] for c in result["cited_documents"]]
     return {
-        "answer":     result["narrative_explanation"],
+        "answer":      result["narrative_explanation"],
         # every document the answer was grounded on, not just the top hit
-        "source":     " · ".join(dict.fromkeys(sources)),
-        "confidence": f"{result['confidence_score'] * 100:.1f}%",
-        "fallback":   result["fallback_triggered"],
+        "source":      " · ".join(dict.fromkeys(sources)),
+        "confidence":  f"{result['confidence_score'] * 100:.1f}%",
+        "fallback":    result["fallback_triggered"],
+        "pathway":     result["source_pathway"],
+        "web_sources": result["web_sources"],
     }

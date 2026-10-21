@@ -517,3 +517,191 @@ def test_ensure_knowledge_base_only_ingests_missing_sources():
     added = kb.ensure_knowledge_base(agent)
     assert agent.ingested == ["neeca_residential_ecbc", "nepra_tariff_slabs_2024"]
     assert added == 11 + 1
+
+
+# ============================================================
+# HYBRID PATHWAY: DOCUMENTS FIRST, WEB SEARCH FALLBACK
+# ============================================================
+
+from backend.agents import insight_rag_agent as rag_module
+from backend.agents import web_search
+
+WEB_RESULTS = [
+    {
+        "title": "NEPRA tariff notification",
+        "url": "https://nepra.org.pk/tariff.pdf",
+        "content": "Residential slab 1-100 units: Rs 10.",
+        "published_date": "2026-07-01",
+        "official": True,
+    },
+    {
+        "title": "Some blog",
+        "url": "https://example.com/post",
+        "content": "Bills rose.",
+        "published_date": "",
+        "official": False,
+    },
+]
+
+
+def make_sequenced_llm(*contents):
+    """Mocked Groq client returning each content in turn."""
+
+    client = MagicMock()
+    completions = []
+    for content in contents:
+        completion = MagicMock()
+        completion.choices = [MagicMock(message=MagicMock(content=content))]
+        completions.append(completion)
+    client.chat.completions.create.side_effect = completions
+    return client
+
+
+def make_hybrid_agent(llm, monkeypatch, results=WEB_RESULTS, context=None):
+    agent = make_agent(llm_client=llm)
+    monkeypatch.setattr(
+        agent, "retrieve_grounding_context",
+        lambda q, ids=None: context or make_grounded_context(),
+    )
+    search = MagicMock(return_value=results)
+    monkeypatch.setattr(rag_module, "search_web", search)
+    return agent, search
+
+
+def test_full_document_coverage_skips_web_search(monkeypatch):
+    llm = make_sequenced_llm("### Direct Answer\nCovered.\nCOVERAGE: FULL")
+    agent, search = make_hybrid_agent(llm, monkeypatch)
+
+    response = agent.answer("What does the policy say?")
+
+    assert response["source_pathway"] == "documents"
+    assert "COVERAGE" not in response["narrative_explanation"]
+    assert response["web_sources"] == []
+    search.assert_not_called()
+
+
+def test_no_document_evidence_uses_web_with_disclosure(monkeypatch):
+    llm = make_sequenced_llm(
+        "NO_RELEVANT_EVIDENCE",
+        "### Direct Answer\nSlab 1 costs Rs 10 per unit [1].",
+    )
+    agent, search = make_hybrid_agent(llm, monkeypatch)
+
+    response = agent.answer("What is the current unit price?")
+
+    assert response["source_pathway"] == "web"
+    assert "external sources" in response["narrative_explanation"]
+    # Only the cited result is listed, and its URL comes from the search API.
+    assert [w["url"] for w in response["web_sources"]] == [
+        "https://nepra.org.pk/tariff.pdf"
+    ]
+    assert response["cited_documents"] == []
+    search.assert_called_once()
+
+
+def test_partial_document_answer_combines_with_web(monkeypatch):
+    llm = make_sequenced_llm(
+        "### Direct Answer\nPart answer.\n### Limitations\n- Rate missing.\n"
+        "COVERAGE: PARTIAL",
+        "### Direct Answer\nCombined [2].",
+    )
+    agent, _ = make_hybrid_agent(llm, monkeypatch)
+
+    response = agent.answer("Explain the policy and current rate.")
+
+    assert response["source_pathway"] == "documents+web"
+    assert response["cited_documents"][0]["document_title"] == "NEECA ECBC-2023"
+    assert [w["url"] for w in response["web_sources"]] == [
+        "https://example.com/post"
+    ]
+
+
+def test_off_topic_question_declines_without_search(monkeypatch):
+    llm = make_sequenced_llm("OFF_TOPIC")
+    agent, search = make_hybrid_agent(llm, monkeypatch)
+
+    response = agent.answer("Who won the cricket world cup?")
+
+    assert response["source_pathway"] == "off_topic"
+    assert response["cited_documents"] == []
+    assert response["web_sources"] == []
+    search.assert_not_called()
+
+
+def test_off_topic_check_runs_when_no_documents_retrieved(monkeypatch):
+    llm = make_sequenced_llm("OFF_TOPIC")
+    empty = {"is_grounded": False, "documents": [], "metadatas": []}
+    agent, search = make_hybrid_agent(llm, monkeypatch, context=empty)
+
+    assert agent.answer("Best pizza recipe?")["source_pathway"] == "off_topic"
+    search.assert_not_called()
+
+
+def test_failed_web_search_reports_insufficient(monkeypatch):
+    llm = make_sequenced_llm("NO_RELEVANT_EVIDENCE")
+    agent, _ = make_hybrid_agent(llm, monkeypatch, results=[])
+
+    response = agent.answer("What is the FPA this month?")
+
+    assert response["source_pathway"] == "insufficient"
+    assert response["web_sources"] == []
+    assert "external sources" not in response["narrative_explanation"]
+
+
+def test_unsupportive_web_results_report_insufficient(monkeypatch):
+    llm = make_sequenced_llm("NO_RELEVANT_EVIDENCE", "WEB_INSUFFICIENT")
+    agent, _ = make_hybrid_agent(llm, monkeypatch)
+
+    response = agent.answer("What is the FPA this month?")
+
+    assert response["source_pathway"] == "insufficient"
+    assert response["web_sources"] == []
+
+
+def test_search_web_without_key_makes_no_request(monkeypatch):
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    post = MagicMock()
+    monkeypatch.setattr(web_search.httpx, "post", post)
+
+    assert web_search.search_web("tariff") == []
+    post.assert_not_called()
+
+
+def test_search_web_request_error_returns_empty(monkeypatch):
+    monkeypatch.setenv("TAVILY_API_KEY", "test")
+    monkeypatch.setattr(
+        web_search.httpx, "post",
+        MagicMock(side_effect=web_search.httpx.ConnectError("down")),
+    )
+
+    assert web_search.search_web("tariff") == []
+
+
+def test_search_web_ranks_official_and_drops_bad_urls(monkeypatch):
+    monkeypatch.setenv("TAVILY_API_KEY", "test")
+    resp = MagicMock()
+    resp.json.return_value = {"results": [
+        {"title": "Blog", "url": "https://blog.com/a", "content": "x", "score": 0.9},
+        {"title": "Bad", "url": "javascript:alert(1)", "content": "x", "score": 0.9},
+        {"title": "Weak", "url": "https://weak.com", "content": "x", "score": 0.1},
+        {"title": "LESCO", "url": "https://www.lesco.gov.pk/t", "content": "x", "score": 0.5},
+    ]}
+    monkeypatch.setattr(web_search.httpx, "post", MagicMock(return_value=resp))
+
+    results = web_search.search_web("tariff")
+
+    assert [r["title"] for r in results] == ["LESCO", "Blog"]
+    assert results[0]["official"] is True
+
+
+def test_fullwidth_citations_are_normalised(monkeypatch):
+    llm = make_sequenced_llm(
+        "NO_RELEVANT_EVIDENCE",
+        "### Direct Answer\nRs 10 per unit【1†L3-L5】.",
+    )
+    agent, _ = make_hybrid_agent(llm, monkeypatch)
+
+    response = agent.answer("Unit price?")
+
+    assert "[1]" in response["narrative_explanation"]
+    assert len(response["web_sources"]) == 1
