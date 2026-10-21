@@ -1,0 +1,6 @@
+slab_label,min_units,max_units,rate_per_unit_pkr,effective_date,source
+Protected (1 - 100 kWh),1,100,16.48,2024-01-01,https://nepra.org.pk/tariff/schedule
+Protected (101 - 200 kWh),101,200,22.95,2024-01-01,https://nepra.org.pk/tariff/schedule
+Unprotected (201 - 300 kWh),201,300,34.26,2024-01-01,https://nepra.org.pk/tariff/schedule
+Unprotected (301 - 700 kWh),301,700,42.12,2024-01-01,https://nepra.org.pk/tariff/schedule
+Unprotected (> 700 kWh),701,99999,48.84,2024-01-01,https://nepra.org.pk/tariff/schedule
