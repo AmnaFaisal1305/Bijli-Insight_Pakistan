@@ -24,6 +24,12 @@ if str(ROOT_DIR) not in sys.path:
 
 import html
 import json
+import re
+
+try:
+    import markdown as _md_lib
+except ImportError:  # pip install markdown
+    _md_lib = None
 import duckdb
 import pandas as pd
 import numpy as np
@@ -248,7 +254,28 @@ hr { border-color:var(--line) !important; border-width:1px 0 0 !important; }
 .bb { padding:10px 14px; border-radius:14px; max-width:72ch; font-size:14px; line-height:1.6; }
 .msg.u .bb { background:var(--pine); color:#fff; border-bottom-right-radius:4px; }
 .msg.b .bb { background:var(--chip); color:var(--ink); border-bottom-left-radius:4px; }
-.src { display:block; margin-top:8px; font-size:11.5px; color:var(--mute); border-top:1px solid var(--line); padding-top:6px; }
+.src { display:block; margin-top:12px; font-size:12px; color:var(--mute); border-top:1px solid var(--line); padding-top:8px; }
+.src b { color:var(--ink); font-weight:600; }
+
+/* Rendered Markdown inside bot answers */
+.msg.b .bb { padding:16px 20px; background:var(--panel); border:1px solid var(--line);
+    box-shadow:0 1px 2px rgba(10,40,35,.05); }
+.bb.md > :first-child { margin-top:0 !important; }
+.bb.md > :last-child { margin-bottom:0 !important; }
+.bb.md h3 { font-size:13px !important; font-weight:700 !important; text-transform:uppercase; letter-spacing:.06em;
+    color:var(--pine) !important; margin:18px 0 6px !important; padding:0 0 5px !important;
+    border-bottom:1px solid var(--line); font-family:Figtree,sans-serif !important; }
+.bb.md h3:first-child { margin-top:0 !important; }
+.bb.md p { margin:0 0 8px; color:var(--ink); }
+.bb.md ul, .bb.md ol { margin:4px 0 10px; padding-left:20px; }
+.bb.md li { margin:0 0 6px; color:var(--ink); }
+.bb.md li::marker { color:var(--pine); }
+.bb.md strong { color:var(--ink); font-weight:700; }
+.bb.md em { color:var(--mute); font-style:italic; }
+.bb.md blockquote { margin:8px 0 10px; padding:8px 14px; border-left:3px solid var(--pine);
+    background:var(--pine2); border-radius:0 8px 8px 0; color:var(--ink); }
+.bb.md blockquote p { margin:0 0 4px; }
+.bb.md code { background:var(--chip); padding:1px 5px; border-radius:4px; font-size:12.5px; }
 .pill { display:inline-flex; gap:6px; align-items:center; background:var(--panel); border:1px solid var(--line); border-radius:99px; padding:6px 14px; font-size:13px; color:var(--ink); }
 .dot { width:8px; height:8px; border-radius:50%; background:var(--ok); flex-shrink:0; display:inline-block; }
 .ur { font-family:"Noto Nastaliq Urdu",serif; font-size:15px; color:var(--pine); line-height:2.2; display:block; }
@@ -439,6 +466,23 @@ _SVG = {
 def _html(s: str) -> str:
     """Strip leading indentation so Markdown never treats HTML as a code block."""
     return "\n".join(line.strip() for line in s.strip().splitlines() if line.strip())
+
+
+def _render_md(text: str) -> str:
+    """
+    Render a bot answer (Markdown) to HTML safely.
+
+    '&' and '<' are escaped first so no raw HTML from the model can
+    reach the page; '>' is kept so Markdown block quotes still work.
+    Output is collapsed onto one line so Streamlit's own Markdown
+    pass does not re-interpret it.
+    """
+    safe = text.replace("&", "&amp;").replace("<", "&lt;")
+    if _md_lib is not None:
+        rendered = _md_lib.markdown(safe, extensions=["sane_lists"])
+    else:
+        rendered = safe.replace("\n", "<br>")
+    return re.sub(r">\s*\n\s*<", "><", rendered).replace("\n", " ")
 
 
 # ---------------------------------------------------------
@@ -967,14 +1011,18 @@ with tab_rag:
     # Chat history (all text escaped)
     chat_html = '<div class="chat-wrap">'
     for msg in st.session_state.chat_history:
-        safe_text = html.escape(msg["text"]).replace("\n", "<br>")
         if msg["role"] == "user":
+            safe_text = html.escape(msg["text"]).replace("\n", "<br>")
             chat_html += f'<div class="msg u"><div class="bb">{safe_text}</div></div>'
         else:
-            cite_part = f'<span class="src">Source: {html.escape(msg["cite"])}</span>' if msg.get("cite") else ""
+            body = _render_md(msg["text"])
+            cite_part = (
+                f'<span class="src"><b>Sources:</b> {html.escape(msg["cite"])}</span>'
+                if msg.get("cite") else ""
+            )
             chat_html += (
                 f'<div class="msg b"><div class="av" style="width:30px;height:30px;border-radius:9px;font-size:11px">AI</div>'
-                f'<div class="bb">{safe_text}{cite_part}</div></div>'
+                f'<div class="bb md">{body}{cite_part}</div></div>'
             )
     chat_html += "</div>"
     st.markdown(chat_html, unsafe_allow_html=True)
@@ -1021,8 +1069,13 @@ with tab_rag:
                 }
         cite_str = ""
         if not result["fallback_triggered"] and result["cited_documents"]:
-            c = result["cited_documents"][0]
-            cite_str = f"{c['document_title']} · {c['section_reference']} · {c['publisher']}"
+            # Group pages per document: "Title (Page 10, Page 21) · Title2 (Page 4)"
+            grouped = {}
+            for c in result["cited_documents"]:
+                grouped.setdefault(c["document_title"], []).append(c["section_reference"])
+            cite_str = " · ".join(
+                f"{title} ({', '.join(pages)})" for title, pages in grouped.items()
+            )
         st.session_state.chat_history.append({"role": "bot", "text": result["narrative_explanation"], "cite": cite_str})
         st.rerun()
 
