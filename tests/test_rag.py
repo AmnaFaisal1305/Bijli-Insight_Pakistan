@@ -389,6 +389,38 @@ def test_rag_explicit_llm_abstention_triggers_fallback():
     assert response["grounding_gold_row_ids"] == []
 
 
+def test_rag_abstention_token_triggers_fallback():
+    agent = make_agent(llm_client=make_llm_client("NO_RELEVANT_EVIDENCE"))
+
+    response = agent.synthesize_verified_advice(
+        user_query="Who won the cricket world cup?",
+        retrieval_context=make_grounded_context(),
+    )
+
+    assert response["fallback_triggered"] is True
+
+
+def test_rag_partial_answer_with_limitation_is_kept():
+    """'I don't know' under Limitations must not discard the answer."""
+
+    partial = (
+        "### Direct Answer\n\n"
+        "NEECA promotes efficient appliances.\n\n"
+        "### Limitations\n\n"
+        "- I don't know based on the available evidence what the exact "
+        "savings are."
+    )
+    agent = make_agent(llm_client=make_llm_client(partial))
+
+    response = agent.synthesize_verified_advice(
+        user_query="What does NEECA promote and how much does it save?",
+        retrieval_context=make_grounded_context(),
+    )
+
+    assert response["fallback_triggered"] is False
+    assert "NEECA promotes efficient appliances" in response["narrative_explanation"]
+
+
 # ============================================================
 # DUCKDB VERIFICATION
 # ============================================================
