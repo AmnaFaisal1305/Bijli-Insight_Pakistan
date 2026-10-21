@@ -42,7 +42,7 @@ CITY_MAP = {
 
 forecaster    = QuantileEnergyForecaster(models_dir=MODELS_DIR)
 chroma_client = chromadb.PersistentClient(path=str(CHROMA_DIR))
-rag_agent     = InsightAgentRAG(chroma_client=chroma_client)
+rag_agent     = InsightAgentRAG(chroma_client=chroma_client, max_policy_results=6)
 ensure_knowledge_base(rag_agent)  # Render's disk is fresh on each deploy
 
 
@@ -193,7 +193,8 @@ async def chat(body: dict):
     sources = [c["document_title"] for c in result["cited_documents"]]
     return {
         "answer":     result["narrative_explanation"],
-        "source":     sources[0] if sources else "",
+        # every document the answer was grounded on, not just the top hit
+        "source":     " · ".join(dict.fromkeys(sources)),
         "confidence": f"{result['confidence_score'] * 100:.1f}%",
         "fallback":   result["fallback_triggered"],
     }

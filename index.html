@@ -662,7 +662,7 @@ async function ask(t){if(!t.trim())return;const c=$('#chat');
  c.insertAdjacentHTML('beforeend',`<div class="entry q"><span class="k">Q</span><div class="t"></div></div>`);c.lastElementChild.querySelector('.t').textContent=t;
  c.insertAdjacentHTML('beforeend',`<div class="entry" id="typing"><span class="k">A</span><div class="t wait">Searching NEECA and NEPRA documents</div></div>`);c.scrollTop=c.scrollHeight;$('#q').value='';
  try{const r=await fetch(`${API}/api/chat`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:t})});const d=await r.json();$('#typing').remove();
-  const src=d.fallback?`<span class="tag no">No matching source · answered "I don't know"</span>`:`<span class="tag ok">Grounded</span><span>Source: <b>${esc(d.source)}</b></span>`;
+  const src=d.fallback?`<span class="tag no">No matching source · answered "I don't know"</span>`:`<span class="tag ok">Grounded</span><span>Sources: <b>${esc(d.source)}</b></span>`;
   c.insertAdjacentHTML('beforeend',`<div class="entry"><span class="k">A</span><div class="t md">${md(d.answer)}</div><div class="src">${src}</div></div>`)}
  catch(e){$('#typing').remove();c.insertAdjacentHTML('beforeend',`<div class="entry"><span class="k" style="color:var(--alert)">ERR</span><div class="t">The advisor did not respond. The backend may be waking up; try again in a minute.</div></div>`)}
  c.scrollTop=c.scrollHeight}
