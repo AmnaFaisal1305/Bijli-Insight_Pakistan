@@ -44,6 +44,11 @@ chroma_client = chromadb.PersistentClient(path=str(CHROMA_DIR))
 rag_agent     = InsightAgentRAG(chroma_client=chroma_client)
 
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 def _conn():
     return duckdb.connect(str(DB_PATH), read_only=True)
 

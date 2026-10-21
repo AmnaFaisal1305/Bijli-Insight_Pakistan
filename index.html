@@ -272,7 +272,7 @@ nav{flex-direction:row;overflow-x:auto}nav a{white-space:nowrap}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 const $=s=>document.querySelector(s);
-const API='http://localhost:8000';
+const API=(['localhost','127.0.0.1',''].includes(location.hostname))?'http://localhost:8000':'https://bijli-insight-api.onrender.com';
 let rates={prot:[[100,16.48],[200,22.95]],unprot:[[300,34.26],[700,42.12],[1e9,48.84]],a2:[[1e9,42]],ind:[[1e9,36]]};
 const typeName={prot:'Protected residential',unprot:'Unprotected residential',a2:'Commercial A-2',ind:'General industrial'};
 fetch(`${API}/api/tariffs`).then(r=>r.json()).then(t=>{rates=t;bill()}).catch(()=>{});
