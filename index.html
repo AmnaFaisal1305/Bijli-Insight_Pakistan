@@ -619,7 +619,7 @@ $('#units').oninput=bill;$('#tariff').onchange=bill;bill();
 
 const ap=[['Air conditioner (1.5 ton)',.9,8,1],['Ceiling fans (4)',.3,12,1],['Fridge',.12,24,1],['Lights and TV',.25,6,1],['Washing machine',.5,1,0]];
 $('#apps').innerHTML='<tbody>'+ap.map((a,i)=>`<tr><td><label><input type="checkbox" data-i="${i}" ${a[3]?'checked':''}>${a[0]}</label></td><td><input type="number" min="0" max="24" value="${a[2]}" data-h="${i}" aria-label="${a[0]} hours per day"> h/day</td></tr>`).join('')+'</tbody>';
-function est(){let u=0;ap.forEach((a,i)=>{if($(`[data-i="${i}"]`).checked)u+=a[1]*(+$(`[data-h="${i}"]`).value||0)*30});u=Math.round(u);$('#useApps').textContent=`Use this estimate · about ${u} units a month`;return u}
+function est(){let u=0;ap.forEach((a,i)=>{if($(`#apps [data-i="${i}"]`).checked)u+=a[1]*(+$(`#apps [data-h="${i}"]`).value||0)*30});u=Math.round(u);$('#useApps').textContent=`Use this estimate · about ${u} units a month`;return u}
 $('#apps').oninput=est;est();$('#useApps').onclick=()=>{$('#units').value=Math.min(1000,est());bill();toast('Usage set from appliances')};
 
 function toast(t){if(window.quiet)return;const e=$('#toast');e.textContent=t;e.style.opacity=1;clearTimeout(toast.t);toast.t=setTimeout(()=>e.style.opacity=0,2200)}
