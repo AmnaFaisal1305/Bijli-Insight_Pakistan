@@ -445,3 +445,43 @@ if __name__ == "__main__":
     raise SystemExit(
         pytest.main([__file__, "-v"])
     )
+
+
+# ============================================================
+# KNOWLEDGE BASE SOURCES
+# ============================================================
+
+def test_tariff_document_carries_every_slab_rate():
+    from backend.pipeline.build_knowledge_base import _tariff_pages, TARIFF_CSV
+    page = _tariff_pages(TARIFF_CSV)[0]
+    for rate in ["16.48", "22.95", "34.26", "42.12", "48.84"]:
+        assert rate in page
+
+
+def test_ocr_transcription_keeps_pdf_page_numbers():
+    from backend.pipeline.build_knowledge_base import _ocr_pages, KB_DIR
+    pages = _ocr_pages(KB_DIR / "neeca_residential_ecbc.ocr.txt")
+    assert len(pages) == 11  # the scanned PDF has 11 pages
+    assert "ECBC-2023" in pages[1]  # page 2 introduces the building code
+
+
+def test_ensure_knowledge_base_only_ingests_missing_sources():
+    from backend.pipeline import build_knowledge_base as kb
+
+    class FakeCollection:
+        def get(self, where, limit):
+            # Pretend the policy PDF is already indexed
+            return {"ids": ["x"] if where["title"] == kb.POLICY_TITLE else []}
+
+    class FakeAgent:
+        collection = FakeCollection()
+        ingested = []
+
+        def ingest_pages(self, pages, doc_id, title, publisher):
+            self.ingested.append(doc_id)
+            return len(pages)
+
+    agent = FakeAgent()
+    added = kb.ensure_knowledge_base(agent)
+    assert agent.ingested == ["neeca_residential_ecbc", "nepra_tariff_slabs_2024"]
+    assert added == 11 + 1

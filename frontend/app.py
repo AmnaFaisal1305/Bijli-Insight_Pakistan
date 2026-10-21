@@ -37,6 +37,7 @@ import streamlit as st
 from backend.ml.quantile_model import QuantileEnergyForecaster
 from backend.ml.model_evaluator import ModelFairnessEvaluator
 from backend.agents.insight_rag_agent import InsightAgentRAG
+from backend.pipeline.build_knowledge_base import ensure_knowledge_base
 import chromadb
 
 st.set_page_config(
@@ -427,12 +428,7 @@ def get_forecaster() -> QuantileEnergyForecaster:
 def get_rag_agent() -> InsightAgentRAG:
     client = chromadb.PersistentClient(path="data/chroma_db")
     agent = InsightAgentRAG(chroma_client=client, db_connection=None)
-    if agent.collection.count() == 0:
-        for pdf_path, title, publisher in [
-            (Path("knowledge_base/neeca_policy_2022.pdf"), "NEECA National Energy Policy 2022", "National Energy Efficiency & Conservation Authority"),
-            (Path("knowledge_base/neeca_residential_ecbc.pdf"), "NEECA Residential ECBC-2023", "National Energy Efficiency & Conservation Authority"),
-        ]:
-            agent.ingest_regulatory_pdf(pdf_path, title, publisher)
+    ensure_knowledge_base(agent)
     return agent
 
 

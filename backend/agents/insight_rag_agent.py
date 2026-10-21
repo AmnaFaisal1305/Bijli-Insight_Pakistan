@@ -379,6 +379,45 @@ class InsightAgentRAG:
             )
             return 0
 
+        pages: List[str] = []
+
+        for page_idx, page in enumerate(reader.pages):
+            try:
+                pages.append(page.extract_text() or "")
+            except Exception:
+                logger.exception(
+                    "Unable to extract text from page %s",
+                    page_idx + 1,
+                )
+                pages.append("")
+
+        return self.ingest_pages(
+            pages, pdf_path.stem, doc_title, publisher
+        )
+
+    def ingest_pages(
+        self,
+        pages: List[str],
+        doc_id: str,
+        doc_title: str,
+        publisher: str,
+    ) -> int:
+        """
+        Index already-extracted page texts (PDF text layer, OCR
+        transcription, or a rendered data table) as overlapping
+        250-word chunks. pages[0] is page 1, so citations keep
+        the source's page numbers.
+
+        Returns:
+            Number of chunks submitted to ChromaDB.
+        """
+
+        if self.collection is None:
+            logger.warning(
+                "ChromaDB is not initialized. Ingestion skipped."
+            )
+            return 0
+
         chunk_size = 250
         overlap = 40
         step = chunk_size - overlap
@@ -387,16 +426,7 @@ class InsightAgentRAG:
         metadatas: List[Dict[str, Any]] = []
         ids: List[str] = []
 
-        for page_idx, page in enumerate(reader.pages):
-            try:
-                page_text = page.extract_text() or ""
-            except Exception:
-                logger.exception(
-                    "Unable to extract text from page %s",
-                    page_idx + 1,
-                )
-                continue
-
+        for page_idx, page_text in enumerate(pages):
             words = page_text.split()
 
             if not words:
@@ -410,7 +440,7 @@ class InsightAgentRAG:
                     continue
 
                 chunk_id = (
-                    f"{pdf_path.stem}_p{page_idx + 1}_c{start}"
+                    f"{doc_id}_p{page_idx + 1}_c{start}"
                 )
 
                 documents.append(chunk_text)
@@ -436,7 +466,7 @@ class InsightAgentRAG:
             )
         except Exception:
             logger.exception(
-                "Failed to index PDF chunks in ChromaDB."
+                "Failed to index chunks in ChromaDB."
             )
             return 0
 

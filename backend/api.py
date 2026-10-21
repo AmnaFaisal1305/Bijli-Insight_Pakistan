@@ -10,6 +10,7 @@ from pathlib import Path
 
 from backend.ml.quantile_model import QuantileEnergyForecaster
 from backend.agents.insight_rag_agent import InsightAgentRAG
+from backend.pipeline.build_knowledge_base import ensure_knowledge_base
 import chromadb
 
 app = FastAPI()
@@ -42,6 +43,7 @@ CITY_MAP = {
 forecaster    = QuantileEnergyForecaster(models_dir=MODELS_DIR)
 chroma_client = chromadb.PersistentClient(path=str(CHROMA_DIR))
 rag_agent     = InsightAgentRAG(chroma_client=chroma_client)
+ensure_knowledge_base(rag_agent)  # Render's disk is fresh on each deploy
 
 
 @app.get("/health")
