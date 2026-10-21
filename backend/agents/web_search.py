@@ -79,7 +79,7 @@ def search_web(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
         results.append({
             "title": str(r.get("title") or urlparse(url).hostname),
             "url": url,
-            "content": str(r.get("content") or "")[:1500],
+            "content": str(r.get("content") or "")[:700],
             "published_date": r.get("published_date") or "",
             "official": is_official(url),
         })

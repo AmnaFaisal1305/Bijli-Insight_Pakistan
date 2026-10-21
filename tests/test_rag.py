@@ -349,7 +349,8 @@ def test_rag_llm_exception_triggers_fallback():
     )
 
     assert response["fallback_triggered"] is True
-    assert "I don't know" in response["narrative_explanation"]
+    assert "temporarily unavailable" in response["narrative_explanation"]
+    assert response["coverage"] == "error"
     assert response["cited_documents"] == []
     assert response["grounding_gold_row_ids"] == []
 
@@ -705,3 +706,52 @@ def test_fullwidth_citations_are_normalised(monkeypatch):
 
     assert "[1]" in response["narrative_explanation"]
     assert len(response["web_sources"]) == 1
+
+
+def _rate_limit_error():
+    import httpx
+    from groq import RateLimitError
+    request = httpx.Request("POST", "https://api.groq.com")
+    return RateLimitError(
+        "rate limited", response=httpx.Response(429, request=request), body=None
+    )
+
+
+def test_rate_limit_retries_on_fallback_model(monkeypatch):
+    monkeypatch.setenv("GROQ_FALLBACK_MODEL", "small-model")
+    llm = make_llm_client("### Direct Answer\nCovered.\nCOVERAGE: FULL")
+    completion = llm.chat.completions.create.return_value
+    llm.chat.completions.create.side_effect = [_rate_limit_error(), completion]
+    agent, _ = make_hybrid_agent(llm, monkeypatch)
+
+    response = agent.answer("What does the policy say?")
+
+    assert response["source_pathway"] == "documents"
+    assert llm.chat.completions.create.call_args.kwargs["model"] == "small-model"
+
+
+def test_llm_outage_is_reported_without_web_search(monkeypatch):
+    llm = make_llm_client()
+    llm.chat.completions.create.side_effect = _rate_limit_error()
+    agent, search = make_hybrid_agent(llm, monkeypatch)
+
+    response = agent.answer("What is the current unit price?")
+
+    assert "temporarily unavailable" in response["narrative_explanation"]
+    assert "reliable evidence" not in response["narrative_explanation"]
+    assert response["web_sources"] == []
+    search.assert_not_called()
+
+
+def test_uncited_web_answer_is_labelled_calculation(monkeypatch):
+    llm = make_sequenced_llm(
+        "NO_RELEVANT_EVIDENCE",
+        "### Direct Answer\n200 x Rs 60 = Rs 12,000.",
+    )
+    agent, _ = make_hybrid_agent(llm, monkeypatch)
+
+    response = agent.answer("Cost of 200 units at Rs 60?")
+
+    assert response["source_pathway"] == "calculation"
+    assert response["web_sources"] == []
+    assert "external sources" not in response["narrative_explanation"]

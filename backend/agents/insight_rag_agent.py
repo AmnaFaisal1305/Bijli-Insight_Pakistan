@@ -24,7 +24,7 @@ import logging
 import chromadb
 import duckdb
 from pypdf import PdfReader
-from groq import Groq
+from groq import Groq, RateLimitError
 from dotenv import load_dotenv
 
 from backend.agents.web_search import search_web
@@ -55,7 +55,7 @@ class GroundedInsightPayload(TypedDict):
     grounding_gold_row_ids: List[str]
     confidence_score: float
     fallback_triggered: bool
-    # documents | web | documents+web | insufficient | off_topic
+    # documents | web | documents+web | calculation | insufficient | off_topic
     source_pathway: str
     # Only ever copied from search API results, never from the LLM.
     web_sources: List[Dict[str, Any]]
@@ -896,24 +896,7 @@ relevant to the question.
         # ----------------------------------------------------
 
         try:
-            response = self.llm.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_prompt,
-                    },
-                    {
-                        "role": "user",
-                        "content": user_prompt,
-                    },
-                ],
-                temperature=0.1,
-                max_completion_tokens=900,
-            )
-
-            message = response.choices[0].message
-            narrative = (message.content or "").strip()
+            narrative = self._complete(system_prompt, user_prompt)
 
             if not narrative:
                 return self._fallback()
@@ -982,7 +965,7 @@ relevant to the question.
             logger.exception(
                 "LLM synthesis failed."
             )
-            return self._fallback()
+            return self._llm_error()
 
     # ========================================================
     # HYBRID PATHWAY: DOCUMENTS FIRST, WEB SEARCH FALLBACK
@@ -1008,31 +991,56 @@ relevant to the question.
             "coverage": "none",
         }
 
-    def _complete(self, system_prompt: str, user_prompt: str) -> str:
-        response = self.llm.chat.completions.create(
-            model=self.model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.1,
-            max_completion_tokens=900,
+    @staticmethod
+    def _llm_error() -> GroundedInsightPayload:
+        """The LLM call failed: say so instead of claiming no evidence."""
+
+        result = InsightAgentRAG._fallback()
+        result["narrative_explanation"] = (
+            "### Direct Answer\n\n"
+            "The AI service is temporarily unavailable or busy, so this "
+            "question could not be answered. Please try again in a few "
+            "minutes."
         )
-        return (response.choices[0].message.content or "").strip()
+        result["coverage"] = "error"
+        return result
+
+    def _complete(self, system_prompt: str, user_prompt: str) -> str:
+        """One chat completion; on a rate limit, retry once on the fallback model."""
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        models = [self.model_name]
+        fallback_model = os.getenv("GROQ_FALLBACK_MODEL", "openai/gpt-oss-20b")
+        if fallback_model and fallback_model != self.model_name:
+            models.append(fallback_model)
+
+        for attempt, model in enumerate(models):
+            try:
+                response = self.llm.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=0.1,
+                    max_completion_tokens=900,
+                )
+                return (response.choices[0].message.content or "").strip()
+            except RateLimitError:
+                # Groq quotas are per model, so the fallback may still have room.
+                if attempt == len(models) - 1:
+                    raise
+                logger.warning("%s rate-limited; retrying on %s.", model, models[-1])
 
     def _is_off_topic(self, user_query: str) -> bool:
-        """Cheap scope check, used only when no document was retrieved."""
+        """Cheap scope check, used only when no document was retrieved. Raises on LLM failure."""
 
-        try:
-            verdict = self._complete(
-                "Reply ON_TOPIC if the question is about electricity, "
-                "energy, tariffs, bills, appliances or energy policy; "
-                "otherwise reply OFF_TOPIC. Reply with the token only.",
-                user_query,
-            )
-        except Exception:
-            logger.exception("Scope check failed.")
-            return False
+        verdict = self._complete(
+            "Reply ON_TOPIC if the question is about electricity, "
+            "energy, tariffs, bills, appliances or energy policy; "
+            "otherwise reply OFF_TOPIC. Reply with the token only.",
+            user_query,
+        )
         return verdict.upper().startswith("OFF_TOPIC")
 
     def _synthesize_from_web(
@@ -1063,7 +1071,9 @@ RULES:
 
 1. Use only the supplied results and the partial document answer
    for factual claims. Never invent tariffs, rates, dates, sources
-   or URLs.
+   or URLs. Figures stated in the question itself (units, rates,
+   wattage, hours) may be used for arithmetic; show the
+   calculation. Unit definitions (1 unit = 1 kWh) need no citation.
 2. Cite web facts inline as [n], matching the numbered results.
    Never cite a number that is not supplied. Do not write URLs.
 3. Prefer official sources (NEPRA, DISCOs, Government of Pakistan).
@@ -1137,12 +1147,17 @@ sources are displayed separately.
 
         if context.get("documents"):
             doc = self.synthesize_verified_advice(user_query, context)
-        elif self._is_off_topic(user_query):
-            return self._off_topic()
         else:
+            try:
+                if self._is_off_topic(user_query):
+                    return self._off_topic()
+            except Exception:
+                logger.exception("Scope check failed.")
+                return self._llm_error()
             doc = self._fallback()
 
-        if doc["source_pathway"] == "off_topic" or doc["coverage"] == "full":
+        # An LLM failure is not evidence of missing coverage: never search on it.
+        if doc["source_pathway"] == "off_topic" or doc["coverage"] in ("full", "error"):
             return doc
 
         partial = doc["coverage"] == "partial"
@@ -1165,7 +1180,7 @@ sources are displayed separately.
             )
         except Exception:
             logger.exception("Web synthesis failed.")
-            text = None
+            return doc if partial else self._llm_error()
 
         if text is None:
             return doc if partial else self._insufficient()
@@ -1174,20 +1189,29 @@ sources are displayed separately.
             int(n) for n in re.findall(r"\[(\d+)\]", text)
             if 1 <= int(n) <= len(results)
         }
-        used = [
-            r for i, r in enumerate(results, start=1)
-            if not cited or i in cited
-        ]
+        # Only results the answer actually cites count as web research.
+        used = [r for i, r in enumerate(results, start=1) if i in cited]
 
-        disclosure = (
-            "*Parts of this question were not covered by the project's "
-            "knowledge-base documents; those parts are based on external "
-            "sources, cited as [n].*"
-            if partial else
-            "*This information was not sufficiently covered by the "
-            "project's knowledge-base documents. The answer below is "
-            "based on external sources.*"
-        )
+        if not used:
+            pathway = "documents" if partial else "calculation"
+            disclosure = (
+                "*No web source was used; any figures not from the "
+                "project's documents are calculated from your question.*"
+            )
+        elif partial:
+            pathway = "documents+web"
+            disclosure = (
+                "*Parts of this question were not covered by the project's "
+                "knowledge-base documents; those parts are based on external "
+                "sources, cited as [n].*"
+            )
+        else:
+            pathway = "web"
+            disclosure = (
+                "*This information was not sufficiently covered by the "
+                "project's knowledge-base documents. The answer below is "
+                "based on external sources.*"
+            )
 
         return {
             "narrative_explanation": (
@@ -1199,7 +1223,7 @@ sources are displayed separately.
             ),
             "confidence_score": 0.0,
             "fallback_triggered": False,
-            "source_pathway": "documents+web" if partial else "web",
+            "source_pathway": pathway,
             "web_sources": [
                 {
                     "title": r["title"],
