@@ -5,7 +5,7 @@ Purpose: Unit tests validating the Tri-Action contract (FIX, FILL, FLAG).
 
 from pathlib import Path
 import pandas as pd
-from agents.data_quality_agent import DataQualityAgent, DQAAction
+from backend.agents.data_quality_agent import DataQualityAgent, DQAAction
 
 
 def test_dqa_tri_action_contract(tmp_path):

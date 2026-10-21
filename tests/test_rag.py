@@ -3,7 +3,7 @@ Location: tests/test_rag.py
 Purpose: Unit tests validating the RAG Insight Agent fallback and citation contracts.
 """
 
-from agents.insight_rag_agent import InsightAgentRAG
+from backend.agents.insight_rag_agent import InsightAgentRAG
 
 
 def test_rag_unsupported_query_triggers_fallback():

@@ -21,6 +21,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def allow_private_network(request, call_next):
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
+
 DB_PATH    = Path("data/warehouse.duckdb")
 MODELS_DIR = Path("models")
 CHROMA_DIR = Path("data/chroma_db")

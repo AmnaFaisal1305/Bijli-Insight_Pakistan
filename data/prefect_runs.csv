@@ -1,0 +1,2 @@
+run_timestamp_utc,flow_name,state,model_mae,baseline_mae,improvement_pct
+2026-10-21T08:40:03.170183+00:00,bijli_insight_hourly_flow,COMPLETED,0.4023,1.8795,78.59
