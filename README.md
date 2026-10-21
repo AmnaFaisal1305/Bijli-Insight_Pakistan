@@ -220,7 +220,7 @@ Submission checklist: only items **used in this repository** are marked.
 | **Integrity gate** | The warehouse refuses to build if any SHA-256 differs from the manifest |
 | **Quantile contract** | Tests assert q10 ≤ q50 ≤ q90 |
 | **RAG grounding** | In-scope questions answered with citations (e.g. protected slabs → NEPRA schedule; home insulation → NEECA building guidance). Out-of-scope questions (e.g. "electricity cost in 2045") return "I don't know". |
-| **Test suite** | 21 tests passing (`pytest tests/`) |
+| **Test suite** | 23 tests passing (`pytest tests/`) |
 
 The evaluator slices error for Pakistan's operating conditions: peak hours (18:00–22:00 PKT), weekends vs weekdays, and heatwave days (≥ 35 °C).
 
