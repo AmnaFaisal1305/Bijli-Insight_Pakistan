@@ -438,10 +438,9 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
    <div class="bh"><h2>Ask the advisor</h2><span class="ur" lang="ur" dir="rtl">مشیر سے پوچھیں</span></div>
    <p class="sub" style="margin:0 0 12px">Answers come only from NEECA and NEPRA documents, with the document and page cited. If the documents do not cover it, the advisor says so.</p>
    <div class="qs" id="sugg">
-    <button>Appliance efficiency labels</button>
-    <button>Protected consumer slabs</button>
-    <button>Saving energy at peak hours</button>
-    <button>Energy audits for industry</button>
+    <button>How much can my bill increase if I consume an additional 100 units?</button>
+    <button>What consumer complaint mechanisms are available for electricity-related disputes?</button>
+    <button>How does NEPRA regulate electricity tariffs?</button>
    </div>
   </div>
   <div class="blk">
@@ -658,7 +657,6 @@ $('#city').addEventListener('change',()=>{try{localStorage.setItem('bi-city',$('
 
 // policy advisor (RAG)
 const md=t=>window.marked&&window.DOMPurify?DOMPurify.sanitize(marked.parse(t||'')):esc(t).replace(/\n/g,'<br>');
-const QMAP={'Appliance efficiency labels':'What does the NEECA policy say about energy efficiency standards and labelling for appliances?','Protected consumer slabs':'What are the protected consumer slabs?','Saving energy at peak hours':'How can consumers save energy during peak hours?','Energy audits for industry':'What does the policy say about energy audits for industry?'};
 async function ask(t){if(!t.trim())return;const c=$('#chat');
  c.insertAdjacentHTML('beforeend',`<div class="entry q"><span class="k">Q</span><div class="t"></div></div>`);c.lastElementChild.querySelector('.t').textContent=t;
  c.insertAdjacentHTML('beforeend',`<div class="entry" id="typing"><span class="k">A</span><div class="t wait">Searching NEECA and NEPRA documents</div></div>`);c.scrollTop=c.scrollHeight;$('#q').value='';
@@ -669,7 +667,7 @@ async function ask(t){if(!t.trim())return;const c=$('#chat');
  c.scrollTop=c.scrollHeight}
 $('#send').onclick=()=>ask($('#q').value);$('#q').onkeydown=e=>{if(e.key==='Enter')ask(e.target.value)};
 $('#clr').onclick=()=>{$('#chat').innerHTML='<div class="entry"><span class="k">NOTE</span><div class="t sub" style="margin:0">Register cleared.</div></div>'};
-$('#sugg').onclick=e=>{const b=e.target.closest('button');if(b)ask(QMAP[b.textContent]||b.textContent)};
+$('#sugg').onclick=e=>{const b=e.target.closest('button');if(b)ask(b.textContent)};
 </script>
 </body>
 </html>
