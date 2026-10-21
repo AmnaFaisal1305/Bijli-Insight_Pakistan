@@ -501,9 +501,9 @@ const typeName={prot:'Protected residential',unprot:'Unprotected residential',a2
 fetch(`${API}/api/tariffs`).then(r=>r.json()).then(t=>{rates=t;bill()}).catch(()=>{});
 fetch(`${API}/api/manifest`).then(r=>r.json()).then(files=>{$('#manifest').innerHTML=files.map(f=>`<tr><td class="m">${esc(f.filename)}</td><td>${esc(f.publisher)}</td><td>${esc(f.licence)}</td><td class="n">${f.row_count?(+f.row_count).toLocaleString():'—'}</td><td class="m" title="${esc(f.sha256_hash)}">${esc((f.sha256_hash||'').slice(0,12))}…</td><td class="m">${esc((f.fetch_timestamp_utc||'').slice(0,16).replace('T',' '))}</td></tr>`).join('')}).catch(()=>{$('#manifest').innerHTML='<tr><td colspan="6">Manifest unavailable. The backend may be waking up; refresh in a minute.</td></tr>'});
 fetch(`${API}/api/status`).then(r=>r.json()).then(s=>{
- $('#sRun').textContent=s.last_run_utc;$('#sRec').textContent=(+s.active_records_count).toLocaleString();$('#sFresh').textContent=s.data_freshness_minutes+' min';
+ $('#sRun').textContent=s.last_run_utc||'no run yet';$('#sRec').textContent=(+s.active_records_count).toLocaleString();$('#sFresh').textContent=s.data_freshness_minutes!=null?s.data_freshness_minutes+' min':'—';
  const st=$('#stamp');st.hidden=false;st.textContent=s.status==='SUCCESS'?'Verified':s.status;st.classList.toggle('bad',s.status!=='SUCCESS');
- $('#aM').textContent=(+s.model_mae).toFixed(4)+' °C';$('#aB').textContent=(+s.baseline_mae).toFixed(4)+' °C';$('#aI').textContent=(+s.improvement_pct).toFixed(1)+'%';
+ if(s.model_mae==null)return;$('#aM').textContent=(+s.model_mae).toFixed(4)+' °C';$('#aB').textContent=(+s.baseline_mae).toFixed(4)+' °C';$('#aI').textContent=(+s.improvement_pct).toFixed(1)+'%';
 }).catch(()=>{$('#sRun').textContent='unreachable'});
 
 // routing

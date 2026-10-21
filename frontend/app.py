@@ -361,14 +361,8 @@ def load_pipeline_status() -> dict:
             return json.loads(STATUS_FILE.read_text(encoding="utf-8"))
         except Exception:
             pass
-    return {
-        "last_run_utc": pd.Timestamp.now("UTC").strftime("%Y-%m-%d %H:%M UTC"),
-        "data_freshness_minutes": 4,
-        "model_mae": 0.42,
-        "baseline_mae": 0.68,
-        "improvement_pct": 38.2,
-        "active_records_count": 52632,
-    }
+    st.error("No pipeline run found (data/pipeline_status.json). Run `python -m backend.pipeline.flow` first.")
+    st.stop()
 
 
 def load_quality_audit_metrics() -> dict:
@@ -540,12 +534,12 @@ with st.sidebar:
 # Load shared data
 # ---------------------------------------------------------
 status = load_pipeline_status()
-mins = status.get("data_freshness_minutes", 4)
-m_mae = status.get("model_mae", 0.42)
-b_mae = status.get("baseline_mae", 0.68)
-pct = status.get("improvement_pct", 38.2)
+mins = status["data_freshness_minutes"]
+m_mae = status["model_mae"]
+b_mae = status["baseline_mae"]
+pct = status["improvement_pct"]
 last_run = status.get("last_run_utc", "N/A")
-total_rows = status.get("active_records_count", 52632)
+total_rows = status["active_records_count"]
 
 # 7 days of hourly rows for the hero strip; last 48h for the Plan section
 _df_week_raw = load_duckdb_data("gold_weather_features", selected_filename, limit=168)

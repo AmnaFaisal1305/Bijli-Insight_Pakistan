@@ -165,18 +165,8 @@ def status():
     conn  = _conn()
     total = conn.execute("SELECT COUNT(*) FROM gold_weather_features").fetchone()[0]
     conn.close()
-    return {
-        "last_fetch_mins_ago": 4,
-        "mae":                 0.42,
-        "baseline_mae":        0.68,
-        "dropped":             0,
-        "fixed":               142,
-        "filled":              3,
-        "flagged":             12,
-        "last_sync":           "2026-10-21 08:37 UTC",
-        "layers":              {"raw": True, "silver": True, "gold": True},
-        "total_rows":          total,
-    }
+    # No pipeline run recorded yet: report that honestly instead of placeholder metrics.
+    return {"status": "NO_RUN_YET", "active_records_count": total}
 
 
 @app.get("/api/tariffs")

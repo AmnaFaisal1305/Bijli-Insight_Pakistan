@@ -10,373 +10,176 @@ pinned: false
 license: mit
 ---
 
-# ⚡ Bijli-Insight Pakistan: Complete System Architecture & Module Guide
+# Bijli-Insight Pakistan · بجلی بصیرت پاکستان
 
-> **National Energy Intelligence & Quantile Load Forecasting System**  
-> *Designed for HackInsight 2026 Hackathon (Pakistan Energy Track)*
+**National energy intelligence for Pakistan's grid.** Bijli-Insight forecasts hourly temperature (the main driver of cooling demand) for Karachi, Lahore and Islamabad with honest uncertainty bands. It turns those forecasts into practical guidance: when the heat peaks, when to avoid heavy load, what a NEPRA bill will cost, and what NEECA/NEPRA policy actually says.
 
----
+HackInsight 2026 · Energy Demand track
 
-## 📖 Executive Summary: What is Bijli-Insight Pakistan?
+| | |
+|---|---|
+| **Live dashboard** | https://bijli-insight-pakistan.vercel.app |
+| **Live API** | https://bijli-insight-api.onrender.com ([health](https://bijli-insight-api.onrender.com/health), [status](https://bijli-insight-api.onrender.com/api/status)) |
 
-Pakistan's electricity grid faces extreme structural pressure: volatile weather patterns, scorching summer heatwaves reaching $48^\circ\text{C}+$, severe peak-hour demand surges ($18:00\text{--}22:00\text{ PKT}$), and steep tiered billing tariffs set by NEPRA.
-
-**Bijli-Insight Pakistan** is an end-to-end, production-grade energy intelligence platform designed to:
-1. **Acquire and Cryptographically Verify** multi-year hourly weather and load data across major Pakistani grid zones (Karachi/K-Electric, Lahore/LESCO, Islamabad/IESCO).
-2. **Store and Structure Data** in a local, zero-dependency, ultra-fast 3-layer **DuckDB Analytical Warehouse**.
-3. **Autonomously Audit and Remediate Data Quality** using an intelligent **Data Quality Agent (DQA)** operating under a deterministic Tri-Action protocol (FIX, FILL, FLAG).
-4. **Predict Future Grid Stress with Uncertainty Bounds** using an asymmetric pinball-loss **LightGBM Quantile Forecaster** ($q_{10}, q_{50}, q_{90}$), ensuring non-crossing confidence intervals.
-5. **Enforce Fairness and Benchmark Superiority** against a rigorous $t-168$ persistence baseline and evaluate error across peak hours, weekends, and heatwave days.
-6. **Deliver Grounded Energy Policy Guidance** via a **RAG Insight Agent** indexing official NEECA ECBC-2023 regulations and NEPRA tariff schedules, with zero hallucinations and mandatory fallbacks.
-7. **Automate and Visualize Operations** through an hourly **Prefect workflow** and an interactive, high-contrast **Streamlit monitoring and consumer advisory studio**.
+> The API runs on Render's free tier and sleeps when idle. The first request after a pause can take about 50 seconds; after that, responses are fast.
 
 ---
 
-## 🗺️ Master System Architecture Diagram
+## Results
 
-This master diagram illustrates how data flows continuously from raw Open-Meteo observations all the way to user decision-making and jury telemetry.
+Every figure below is read from `data/pipeline_status.json`, written by the pipeline's last run. The dashboard reads the same file through `/api/status`; nothing is typed into the UI.
 
-```mermaid
-flowchart TD
-    subgraph S1["1. INGESTION & AUDIT LAYER"]
-        API["Open-Meteo & PMD Archive"] -->|"Fetch 2-Year Hourly CSVs"| RAW["data/raw/ Storage"]
-        RAW -->|"Compute SHA-256 Hashes"| MANIFEST["data/raw/manifest.csv Ledger"]
-    end
+| Metric | Value |
+|---|---|
+| Model MAE, median forecast (q50) | **0.4023 °C** |
+| Declared baseline MAE (same hour last week, t − 168) | **1.8795 °C** |
+| Error reduction vs baseline | **78.6%** |
+| Records in warehouse | 52,632 hourly rows (3 cities, 2024–2025) |
+| Train / test split | Chronological 80 / 20 (41,702 / 10,426 rows), no shuffling |
+| Unit tests | 18 / 18 passing |
 
-    subgraph S2["2. QUALITY CONTROL & WAREHOUSE"]
-        RAW --> DQA["Module 3: Data Quality Agent (DQA)"]
-        DQA -->|"Audit Trail"| QLOG["data/quality_log.json"]
-        DQA -->|"Cleaned Stream"| DUCK["Module 2: DuckDB Analytical Warehouse"]
-        DUCK --> L2["cleaned_weather (Normalized)"]
-        L2 --> L3["gold_weather_features (Lags & Rolling)"]
-    end
-
-    subgraph S3["3. MACHINE LEARNING & EVALUATION"]
-        L3 --> SPLIT["Chronological 80/20 Train/Test Split"]
-        SPLIT --> ML["Module 4: LightGBM Multi-Quantile Forecaster"]
-        ML -->|"Pinball Loss (q10, q50, q90)"| PREDS["Calibrated Uncertainty Intervals"]
-        PREDS --> EVAL["Module 5: Fairness & Baseline Evaluator"]
-        EVAL -->|"vs. t-168 Persistence"| METRICS["Group Slice Slices & Status"]
-    end
-
-    subgraph S4["4. REGULATORY RAG INTELLIGENCE"]
-        PDFS["rag_knowledge_base/ (NEECA & NEPRA PDFs)"] --> RAG["Module 6: Insight Agent RAG (ChromaDB)"]
-        L3 -.->|"Row ID Anchors"| RAG
-        RAG --> ADVICE["Grounded Citations & Policy Answers"]
-    end
-
-    subgraph S5["5. ORCHESTRATION & DASHBOARD"]
-        CRON["Hourly Trigger (Prefect 5 * * * *)"] --> FLOW["Module 7: pipeline/flow.py"]
-        FLOW --> DQA
-        FLOW --> DUCK
-        FLOW --> STATUS["data/pipeline_status.json"]
-        STATUS --> UI["frontend/app.py (Streamlit Studio)"]
-        DUCK --> UI
-        PREDS --> UI
-        ADVICE --> UI
-    end
-```
+The baseline was declared before training (see [`Dataset_Declaration.md`](Dataset_Declaration.md)).
 
 ---
 
-## 🧩 Deep Dive: The 7 Core System Modules
+## What it does
+
+1. **Verified data.** Hourly Open-Meteo / PMD archives for three cities, plus NEPRA 2024 tariff slabs. Every raw file is fingerprinted with SHA-256 in `data/raw/manifest.csv`, and the warehouse build re-hashes the files and refuses to run if a single byte has changed.
+2. **3-layer DuckDB warehouse.** Raw (manifest-verified) → `cleaned_weather` → `gold_weather_features`, with lag features (t−1, t−24, t−168) and a 24-hour rolling mean, computed without future leakage.
+3. **Data Quality Agent.** Runs on every incoming record: **FIX** wrong types/units, **FILL** short gaps (marked `is_imputed`), **FLAG** physically implausible values (`is_anomalous`, never silently dropped). Decisions go to `data/quality_log.json`.
+4. **Quantile forecasting.** Three LightGBM models trained with pinball loss give q10 / q50 / q90, so every forecast is a range, not a single guess. Non-crossing (q10 ≤ q50 ≤ q90) is enforced after prediction.
+5. **Hourly pipeline.** A Prefect flow (`5 * * * *`) fetches the latest observation, audits it, appends it to the warehouse and re-runs inference, updating `pipeline_status.json` and `prefect_runs.csv`.
+6. **Grounded policy advisor (RAG).** NEECA policy PDFs are indexed in ChromaDB. A Groq-hosted LLM writes answers only from the retrieved passages, and citations (document and page) come from retrieval metadata, not from the model. If the documents don't cover a question, it answers "I don't know".
+7. **Dashboard.** A single static page (`index.html`) designed in the language of a Pakistani electricity bill, with five sections:
+   - Overview: tomorrow's high, plan-your-day guidance, city comparison, accuracy, source integrity
+   - 7-day forecast with the uncertainty band and a 3D hourly heat map
+   - NEPRA bill estimator with an appliance builder
+   - Policy advisor
+   - Data explorer over the warehouse
 
 ---
 
-### Module 1: Data Acquisition & Cryptographic Manifest Service
-*Files: `pipeline/data_fetcher.py` • `pipeline/generate_manifest.py`*
-
-#### Purpose
-Fetches high-resolution historical hourly weather telemetry ($52,632+$ rows across Karachi, Lahore, and Islamabad) covering 2024 to 2026. To guarantee data provenance and prevent tampering, it computes cryptographic SHA-256 checksums for every raw CSV and writes an immutable audit ledger (`manifest.csv`).
-
-#### Key Features
-- **Deterministic Checksumming**: Every file is chunk-read (8 KB blocks) and hashed using SHA-256.
-- **Audit Ledger Metadata**: Records file name, source URL, publisher (PMD/Open-Meteo), fetch timestamp in UTC, license (CC-BY 4.0), and verified row count.
-- **Tamper Detection**: If even a single comma in a raw CSV is modified, the pipeline immediately flags a checksum mismatch.
+## Architecture
 
 ```mermaid
 flowchart LR
-    A["Raw Weather CSVs (3 Cities)"] --> B["PakistanDataFetcher / ManifestBuilder"]
-    B --> C["Compute SHA-256 Digest"]
-    B --> D["Extract Metadata (Source, Rows, Time)"]
-    C --> E["manifest.csv"]
-    D --> E
-    E --> F["Warehouse Gatekeeper (Integrity Check)"]
-```
-
----
-
-### Module 2: 3-Layer DuckDB Analytical Warehouse Engine
-*File: `pipeline/warehouse_pipeline.py`*
-
-#### Purpose
-Implements a reproducible, zero-dependency, local columnar analytical warehouse. Following modern data engineering best practices, data is organized into three distinct layers: Raw, Cleaned, and Gold. It enables fast feature engineering without database locks or server setup.
-
-#### The 3 Warehouse Layers
-1. **Layer 1: Raw Verification**: Verifies `manifest.csv` cryptographic checksums before any file is loaded.
-2. **Layer 2: Cleaned Layer (`cleaned_weather`)**:
-   - Parses ISO-8601 strings into microsecond-precision UTC timestamps.
-   - Standardizes disparate column names across weather stations.
-   - Converts readings into 32-bit floating point numbers.
-   - Tracks data provenance with `is_imputed` and `is_anomalous` boolean flags.
-3. **Layer 3: Processed / Gold Layer (`gold_weather_features`)**:
-   - Generates deterministic, immutable primary keys: `row_id = md5(filename || timestamp_utc)`.
-   - Computes temporal lag features: $t-1$ (previous hour), $t-24$ (previous day), and $t-168$ (same hour last week).
-   - Computes a 24-hour moving window rolling average (`temp_rolling_24`).
-   - Strictly prevents future data leakage using partition-based analytical window queries.
-
-```mermaid
-flowchart TD
-    subgraph L1["Layer 1: Raw Verification"]
-        CSV["Raw CSV Files"] --> HASH["Verify SHA-256 vs manifest.csv"]
+    subgraph Data
+        OM["Open-Meteo / PMD archive"] --> RAW["data/raw/*.csv"]
+        NEPRA["NEPRA 2024 tariffs"] --> RAW
+        RAW --> MAN["manifest.csv (SHA-256)"]
     end
-
-    subgraph L2["Layer 2: Cleaned Layer (cleaned_weather)"]
-        HASH -->|"Pass Checksum"| PARSE["Parse Timestamps to UTC"]
-        PARSE --> CAST["Cast to float32 & Standardize Schema"]
-        CAST --> FLAGS["Add is_imputed & is_anomalous Flags"]
+    subgraph Pipeline["backend/pipeline"]
+        MAN --> WH["warehouse_pipeline.py: raw, cleaned, gold (DuckDB)"]
+        FLOW["flow.py (Prefect, hourly)"] --> DQA["agents/data_quality_agent.py"]
+        DQA --> WH
     end
-
-    subgraph L3["Layer 3: Gold Layer (gold_weather_features)"]
-        FLAGS --> ROWID["Generate Primary Key: md5(file + timestamp)"]
-        ROWID --> LAGS["Window Functions: LAG(1), LAG(24), LAG(168)"]
-        LAGS --> ROLLING["Moving Average: 24h Window"]
-        ROLLING --> DUCK_TABLE["DuckDB Table Ready for ML & Analytics"]
+    subgraph Models["backend/ml + backend/agents"]
+        WH --> QM["quantile_model.py: LightGBM q10/q50/q90"]
+        QM --> EV["model_evaluator.py vs t-168 baseline"]
+        PDF["knowledge_base/*.pdf"] --> RAG["insight_rag_agent.py: ChromaDB + Groq"]
     end
-```
-
----
-
-### Module 3: Autonomous Data Quality Agent (DQA)
-*File: `agents/data_quality_agent.py`*
-
-#### Purpose
-Real-world sensor feeds frequently suffer from missing values, bad types, and transmission glitches. Rather than blindly dropping rows (which destroys time continuity), the Data Quality Agent enforces a strict, deterministic **Tri-Action Protocol** (FIX, FILL, FLAG) and logs all remediations to an immutable audit ledger (`quality_log.json`).
-
-#### The Tri-Action Protocol
-- **FIX (Deterministic Type Normalization)**:
-  - Detects numbers mistakenly formatted as strings (e.g. `"25.4"` instead of `25.4`).
-  - Converts columns to standardized `float32` types.
-  - Logs `TypeConsistencyRule` action.
-- **FILL (Short-Gap Imputation)**:
-  - Detects transient sensor dropout windows of $\le 2$ consecutive missing hours.
-  - Applies linear interpolation to preserve the time-series continuity.
-  - Sets `is_imputed = True` so downstream models know the value was filled.
-  - Logs `ShortGapImputationRule` action.
-- **FLAG (Physical Boundary Validation)**:
-  - Detects impossible readings ($> 55^\circ\text{C}$ or $< -10^\circ\text{C}$).
-  - Flags the record with `is_anomalous = True` **without** altering the recorded value, preserving extreme real-world heatwave patterns for ML training.
-  - Logs `PhysicalBoundaryRule` action.
-
-```mermaid
-stateDiagram-v2
-    [*] --> IngestObservation
-    IngestObservation --> CheckTypes
-    CheckTypes --> FixApplied: String/Mixed Detected
-    CheckTypes --> CheckGaps: Clean Numeric
-    FixApplied --> CheckGaps: Log FIX to quality_log.json
-    
-    CheckGaps --> FillApplied: Gap <= 2 Hours
-    CheckGaps --> CheckBoundaries: No Gap or Gap > 2h
-    FillApplied --> CheckBoundaries: Interpolate & Set is_imputed = True
-    
-    CheckBoundaries --> FlagApplied: Temp > 55C or < -10C
-    CheckBoundaries --> Complete: Valid Physical Range
-    FlagApplied --> Complete: Keep Value & Set is_anomalous = True
-    Complete --> [*]
-```
-
----
-
-### Module 4: Multi-Quantile Energy Forecaster (LightGBM Pinball Loss)
-*File: `ml/quantile_model.py`*
-
-#### Purpose
-Standard point-forecast models (such as single-line regression) are hazardous for power grid management because they fail to convey weather volatility and peak surge risks. This module trains three dedicated LightGBM gradient boosted trees using **Pinball Loss (Quantile Loss)** to output calibrated $80\%$ uncertainty intervals $[q_{10}, q_{50}, q_{90}]$.
-
-#### Mathematical Formulation
-For any quantile level $\alpha \in \{0.10, 0.50, 0.90\}$, the Pinball Loss function is:
-$$\mathcal{L}_\alpha(y, \hat{y}) = \max\Big(\alpha(y - \hat{y}),\, (1 - \alpha)(\hat{y} - y)\Big)$$
-
-- **$q_{10}$ (Lower Bound / Floor)**: High penalty when the prediction exceeds the truth. Represents the baseline minimum demand.
-- **$q_{50}$ (Median / Expected)**: Standard median expectation curve ($L_1$ loss).
-- **$q_{90}$ (Upper Bound / Ceiling)**: Heavy penalty when the prediction underestimates the truth. Critical for grid dispatchers preparing for peak AC cooling demand.
-
-#### Non-Crossing Monotonic Constraint
-In raw quantile models, quantile crossing ($\hat{y}_{10} > \hat{y}_{50}$) can occasionally occur due to gradient noise. Our forecaster enforces post-processing monotonic ordering:
-$$\hat{y}_{50} = \max(\hat{y}_{10}, \hat{y}_{50}), \quad \hat{y}_{90} = \max(\hat{y}_{50}, \hat{y}_{90})$$
-
-```mermaid
-flowchart TD
-    DATA["Gold Table Features (Hour, Day, Lags, Rolling)"] --> TIME_SPLIT["Chronological 80/20 Cut (No Leakage)"]
-    TIME_SPLIT --> TRAIN["Training Dataset"]
-    TIME_SPLIT --> TEST["Out-of-Time Test Set"]
-
-    TRAIN --> Q10["LightGBM Booster (alpha = 0.10)"]
-    TRAIN --> Q50["LightGBM Booster (alpha = 0.50)"]
-    TRAIN --> Q90["LightGBM Booster (alpha = 0.90)"]
-
-    Q10 --> P10["Lower Bound Predictions"]
-    Q50 --> P50["Median Predictions"]
-    Q90 --> P90["Upper Bound Predictions"]
-
-    P10 --> ORDER["Enforce Monotonic Non-Crossing: q10 <= q50 <= q90"]
-    P50 --> ORDER
-    P90 --> ORDER
-    ORDER --> INTERVALS["Calibrated 80% Prediction Bracket"]
-```
-
----
-
-### Module 5: Model Fairness & Baseline Benchmark Evaluator
-*File: `ml/model_evaluator.py`*
-
-#### Purpose
-Judges and power dispatchers require empirical proof that a machine learning model genuinely outperforms simple heuristics and behaves fairly across different operational operating regimes.
-
-#### Benchmark Metrics
-1. **Declared Persistence Baseline ($t-168$)**:
-   $$\hat{y}_t = y_{t - 168}$$
-   Predicts that this hour's temperature and load will match the exact same hour from one week ago. The ML model demonstrates a **$+38.2\%$ MAE improvement** over this baseline.
-2. **Empirical Quantile Calibration**:
-   Measures the percentage of ground-truth observations that fall strictly within $[q_{10}, q_{90}]$. The target is $\approx 80\%$, proving mathematical calibration without artificial interval inflation.
-3. **Operational Slice Error Evaluation**:
-   Partitions test errors across critical Pakistani grid operating slices:
-   - **Time Slice**: Peak Hours ($18:00\text{--}22:00$ PKT) vs. Off-Peak Hours.
-   - **Day Slice**: Weekdays vs. Weekends.
-   - **Weather Slice**: Heatwave days ($\ge 35^\circ\text{C}$) vs. Moderate temperature days.
-
-```mermaid
-flowchart LR
-    A["Test Set Predictions vs. Actuals"] --> B["ModelFairnessEvaluator"]
-    
-    B --> C["1. Baseline Benchmark"]
-    C --> C1["Compute MAE vs. t-168 (+38.2% Superiority)"]
-    
-    B --> D["2. Interval Calibration"]
-    D --> D1["Verify q10 <= q50 <= q90"]
-    D --> D2["Empirical Coverage Check (~80% Target)"]
-    
-    B --> E["3. Group Slicing Breakdown"]
-    E --> E1["Peak (18:00-22:00) vs. Off-Peak"]
-    E --> E2["Heatwave (>= 35C) vs. Moderate"]
-```
-
----
-
-### Module 6: Regulatory RAG Insight Agent (ChromaDB + DuckDB Anchor)
-*File: `agents/insight_rag_agent.py`*
-
-#### Purpose
-Large Language Models frequently hallucinate regulatory clauses and generate fictional energy prices. The RAG Insight Agent solves this by indexing official Pakistan energy documents into **ChromaDB** and anchoring numerical insights to **verified DuckDB Gold row IDs**.
-
-#### Strict Regulatory Constraints
-- **Official Knowledge Corpus**: Indexes the *NEECA Energy Conservation Building Code (ECBC-2023)*, *National Energy Policy 2022*, and *NEPRA S.R.O. Tariff Schedules*.
-- **Mandatory Fallback ("I Don't Know")**: If a user asks an unsupported question (e.g., *"What will electricity cost in the year 2045?"*), the agent triggers a strict fallback rather than hallucinating an answer.
-- **Documented Citations**: Every recommendation includes the document title, publisher, and page reference.
-- **Telemetry Anchor**: Recommendations cite corresponding DuckDB telemetry primary keys (`row_id`).
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User as User / Consumer
-    participant Agent as InsightAgentRAG
-    participant Chroma as ChromaDB Vector Store
-    participant Duck as DuckDB Gold Table
-
-    User->>Agent: "What temperature should my AC be set at?"
-    Agent->>Chroma: Query vector similarity (NEECA policy chunks)
-    alt Relevant Policy Found
-        Chroma-->>Agent: Returns ECBC-2023 Section 5.2.1 (Page 14)
-        Agent->>Duck: Cross-reference local telemetry row_id
-        Duck-->>Agent: Verified local temperature readings
-        Agent-->>User: Grounded advice: Set AC to 26°C with official NEECA citation & row_id
-    else Unsupported Query
-        Chroma-->>Agent: Similarity below relevance threshold
-        Agent-->>User: "I don't know based on current verified data and official advisories."
+    subgraph Serve
+        API["backend/api.py (FastAPI on Render)"]
+        UI["index.html (Vercel)"]
     end
+    QM --> API
+    WH --> API
+    RAG --> API
+    EV --> STATUS["data/pipeline_status.json"] --> API
+    API --> UI
+```
+
+### API
+
+| Endpoint | Returns |
+|---|---|
+| `GET /api/forecast?city=karachi` | 168 hourly q10 / q50 / q90 values, from Open-Meteo forecast inputs and warehouse lag history |
+| `GET /api/weather?city=…&table=…&limit=…` | Warehouse rows plus average/max temperature and humidity |
+| `GET /api/status` | Last pipeline run: MAE, baseline MAE, improvement, freshness, record count |
+| `GET /api/manifest` | Source files with publisher, licence, row count and SHA-256 |
+| `GET /api/tariffs` | NEPRA slab rates from `data/raw/nepra_tariff_slabs_2024.csv` |
+| `POST /api/chat` `{question}` | Grounded answer (Markdown), primary source, fallback flag |
+| `GET /health` | Liveness check |
+
+---
+
+## Repository layout
+
+```
+├── index.html                 Dashboard (static, deployed to Vercel)
+├── backend/
+│   ├── api.py                 FastAPI service (deployed to Render)
+│   ├── pipeline/              data_fetcher, generate_manifest, warehouse_pipeline, flow (Prefect)
+│   ├── agents/                data_quality_agent, insight_rag_agent (RAG)
+│   └── ml/                    quantile_model (LightGBM), model_evaluator
+├── frontend/app.py            Streamlit version of the dashboard (Hugging Face Space)
+├── data/
+│   ├── raw/                   Source CSVs + manifest.csv (SHA-256 ledger)
+│   ├── warehouse.duckdb       Built warehouse
+│   ├── chroma_db/             Vector index of the policy PDFs
+│   ├── pipeline_status.json   Metrics from the last pipeline run
+│   ├── prefect_runs.csv       Pipeline run history
+│   └── quality_log.json       Data Quality Agent audit log
+├── models/                    Trained LightGBM quantile models (q10, q50, q90)
+├── knowledge_base/            NEECA policy PDFs indexed for RAG
+├── tests/                     pytest suite (fetcher, warehouse, DQA, model, RAG)
+├── docs/                      Architecture walkthroughs, product brief, design system
+├── render.yaml                Render blueprint for the API
+├── vercel.json                Static deploy config for the dashboard
+├── AI_Use_Log.md              AI assistance declaration (submission requirement)
+└── Dataset_Declaration.md     Data sources, licences, baseline declaration
 ```
 
 ---
 
-### Module 7: Continuous Orchestration & Operational Monitoring Dashboard
-*Files: `pipeline/flow.py` • `frontend/app.py`*
+## Run it locally
 
-#### Purpose
-Connects all data pipelines, agents, and models into an automated, living system. It features an automated hourly **Prefect workflow** and a modern, high-contrast **Streamlit application** built with Pakistani emerald styling (`#064e3b`, `#10b981`, `#0f172a`).
+Tested on Python 3.12 (Render) and 3.13 (local).
 
-#### Subcomponents
-1. **Prefect Scheduled Flow (`pipeline/flow.py`)**:
-   - Executes at minute 5 of every hour (`5 * * * *`).
-   - Fetches live hourly readings for Karachi/Lahore/Islamabad.
-   - Runs DQA audit $\to$ appends to DuckDB $\to$ updates `pipeline_status.json` and `prefect_runs.csv`.
-2. **Streamlit Multi-Tab Studio (`frontend/app.py`)**:
-   - **Control Sidebar**: City selector (Karachi K-Electric, Lahore LESCO, Islamabad IESCO), tariff slab selector, and live DuckDB connection status.
-   - **Tab 1 (⚡ Operational Health & Jury Audit)**: Live freshness metric, Tri-Action DQA ledger (FIX/FILL/FLAG), model MAE vs. baseline, and SHA-256 manifest table.
-   - **Tab 2 (📊 DuckDB Warehouse Explorer)**: Direct query interface over the $52,632+$ rows with sorting, summary statistics, and one-click CSV export.
-   - **Tab 3 (📈 7-Day Quantile Forecasting Studio)**: Interactive horizon slider ($24\text{--}168$ hours), non-crossing uncertainty curves, and fairness slices.
-   - **Tab 4 (💡 Smart Bill & Tariff Calculator)**: Interactive sliders for monthly units (kWh), AC units, and peak hours. Computes NEPRA 2024 slab bills and estimates savings using NEECA's $26^\circ\text{C}$ rule.
-   - **Tab 5 (🤖 NEECA & NEPRA Policy AI)**: Interactive RAG chat with verified citations and anti-hallucination guardrails.
+```bash
+python -m venv .venv
+.venv\Scripts\activate          # Windows; use `source .venv/bin/activate` on macOS/Linux
+pip install -r requirements.txt pytest prefect
 
-```mermaid
-flowchart TD
-    subgraph CRON["Hourly Orchestrator (Prefect: 5 * * * *)"]
-        T1["task_fetch_live_observation"] --> T2["task_run_quality_audit (DQA)"]
-        T2 --> T3["task_append_warehouse (DuckDB)"]
-        T3 --> T4["task_run_inference_and_log_status"]
-        T4 --> STATUS_JSON["data/pipeline_status.json"]
-        T4 --> RUNS_CSV["data/prefect_runs.csv"]
-    end
+# Optional: enables LLM answers in the policy advisor (otherwise it falls back to "I don't know")
+echo GROQ_API_KEY=your_key > .env
 
-    subgraph UI["Streamlit User & Jury Experience"]
-        STATUS_JSON --> TAB1["Tab 1: Health & Audit Cards"]
-        T3 --> TAB2["Tab 2: DuckDB Dataset Explorer"]
-        T4 --> TAB3["Tab 3: 7-Day Quantile Forecaster"]
-        CALC["User kWh & AC Sliders"] --> TAB4["Tab 4: NEPRA Bill Calculator"]
-        RAG_BOX["User Query Box"] --> TAB5["Tab 5: Grounded NEECA Advisor"]
-    end
+pytest tests/ -v                               # 18 tests
+python -m backend.pipeline.warehouse_pipeline  # rebuild the DuckDB warehouse from raw CSVs
+python -m backend.pipeline.flow                # one pipeline cycle (trains models if models/ is empty)
+uvicorn backend.api:app --port 8000            # start the API
 ```
+
+Then open `index.html` in a browser. When it's served from `localhost` or opened as a file, it calls `http://localhost:8000`; anywhere else it calls the Render API.
+
+Streamlit version: `streamlit run frontend/app.py`.
+
+The Makefile wraps the same commands: `make test`, `make data`, `make pipeline`, `make app`.
 
 ---
 
-## 🚀 Quick Execution Guide
+## Deployment
 
-All commands run inside the project virtual environment `(venv)` in PowerShell:
-
-### 1. Run Automated Unit Tests (Verify Everything Passes)
-```powershell
-pytest tests/ -v
-```
-
-### 2. Run One Cycle of the Hourly Pipeline
-```powershell
-python -m pipeline.flow
-```
-
-### 3. Rebuild the DuckDB Analytical Warehouse From Scratch (`make data`)
-```powershell
-python -m pipeline.warehouse_pipeline
-```
-
-### 4. Launch the Interactive Streamlit Application
-```powershell
-streamlit run frontend/app.py
-```
+- **API:** Render web service defined in `render.yaml`. It installs `requirements-render.txt` (backend dependencies without Streamlit), runs `uvicorn backend.api:app`, and is health-checked on `/health`. Set `GROQ_API_KEY` in the Render dashboard.
+- **Dashboard:** Vercel static deploy of `index.html` (`vercel.json`, no build step).
+- **Streamlit:** Hugging Face Space using the front-matter at the top of this file.
 
 ---
 
-## 📊 Summary Table of Project Modules
+## Honest limitations
 
-| Module # | Module Name | Primary File | Key Input | Primary Output | Verification Method |
-| :---: | :--- | :--- | :--- | :--- | :--- |
-| **1** | **Data Acquisition & Manifest** | `pipeline/generate_manifest.py` | Open-Meteo API / PMD | `data/raw/manifest.csv` | SHA-256 Checksums |
-| **2** | **DuckDB Analytical Warehouse** | `pipeline/warehouse_pipeline.py` | Raw CSVs + Manifest | `data/warehouse.duckdb` | 3-Layer Tables & Row IDs |
-| **3** | **Data Quality Agent (DQA)** | `agents/data_quality_agent.py` | Incoming observation | `data/quality_log.json` | Tri-Action (FIX, FILL, FLAG) |
-| **4** | **Quantile Forecaster (Pinball)** | `ml/quantile_model.py` | Gold table features | Calibrated $[q_{10}, q_{50}, q_{90}]$ | Non-crossing guarantees |
-| **5** | **Fairness & Baseline Evaluator**| `ml/model_evaluator.py` | Model vs. $t-168$ | Error & coverage metrics | Group slice reports |
-| **6** | **Regulatory RAG Insight Agent** | `agents/insight_rag_agent.py` | NEECA/NEPRA PDFs | Grounded citations | Fallback to "I don't know" |
-| **7** | **Orchestration & Dashboard** | `frontend/app.py` | Live telemetry & DuckDB | Streamlit Studio | Browser UI & Prefect runs |
+- Temperature is used as a **proxy** for cooling demand; the system does not forecast MW load directly.
+- The bill estimator applies NEPRA 2024 slab rates and approximates taxes and surcharges at 17%. Fixed charges vary by DISCO.
+- The policy advisor only knows the indexed NEECA documents. Questions outside them (for example a specific thermostat setting) return "I don't know" rather than a guess.
+- The free-tier API sleeps when idle (about 50 s cold start).
 
 ---
 
-*Bijli-Insight Pakistan • Autonomous National Energy Intelligence System • HackInsight 2026*
+## Documentation
+
+- [`docs/current_flow.md`](docs/current_flow.md): architecture overview
+- [`docs/project_flow.md`](docs/project_flow.md): file-by-file walkthrough of the pipeline
+- [`docs/PRODUCT.md`](docs/PRODUCT.md): product brief (users, purpose, principles)
+- [`docs/DESIGN.md`](docs/DESIGN.md): dashboard design system
+- [`Dataset_Declaration.md`](Dataset_Declaration.md): sources, licences, declared baseline
+- [`AI_Use_Log.md`](AI_Use_Log.md): how AI tools were used and what the team verified
