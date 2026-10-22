@@ -12,7 +12,7 @@ services:
       - key: PYTHON_VERSION
         value: 3.12.7
       # secrets: set in the Render dashboard
-      - key: GROQ_API_KEY
+      - key: GEMINI_API_KEY
         sync: false
       - key: TAVILY_API_KEY
         sync: false

@@ -37,7 +37,7 @@ The system is a full stack:
 5. Train **LightGBM** pinball-loss models at q10, q50 and q90, evaluated against a declared t−168 persistence baseline.
 6. Answer policy questions through a **RAG agent**:
    - It retrieves from ChromaDB over NEECA documents and NEPRA tariffs.
-   - A Groq-hosted LLM writes the answer only from the retrieved passages.
+   - A Gemini LLM writes the answer only from the retrieved passages.
    - When the documents don't fully cover an on-topic question, it searches the web (Tavily), prefers NEPRA, DISCO and government sources, and cites them with links. Every answer is labelled: project documents, web research, both, calculation, insufficient evidence, or out of scope.
    - When neither source gives reliable evidence, it says so instead of guessing.
 7. Refresh hourly with **Prefect**, serve everything through a **FastAPI** backend, and present results in a **web dashboard**. A Streamlit version is also included.
@@ -94,7 +94,7 @@ Open-Meteo API  →  data/raw/*.csv  →  SHA-256 manifest
                                       ↓
               LightGBM q10/q50/q90  +  evaluator (vs t−168 baseline)
                                       ↓
-     Insight RAG Agent (ChromaDB + NEECA docs + NEPRA tariffs + Groq LLM)
+     Insight RAG Agent (ChromaDB + NEECA docs + NEPRA tariffs + Gemini LLM)
                                       ↓
      Prefect hourly flow  →  FastAPI (Render)  →  Web dashboard (Vercel)
                                                   Streamlit studio (alternate)
@@ -105,7 +105,7 @@ Open-Meteo API  →  data/raw/*.csv  →  SHA-256 manifest
 | Agent | Role | How it decides |
 | --- | --- | --- |
 | **Data Quality Agent** (`backend/agents/data_quality_agent.py`) | Autonomous remediation | **FIX** object→numeric casts. **FILL** linear interpolation for gaps of at most two hours (`is_imputed`). **FLAG** temperatures outside −10 °C to 55 °C (`is_anomalous`) without rewriting the measurement. Every action is appended to `data/quality_log.json`. |
-| **Insight RAG Agent** (`backend/agents/insight_rag_agent.py`) | Grounded policy advisor | Retrieves the most relevant chunks from ChromaDB. A Groq-hosted LLM (default `openai/gpt-oss-120b`) writes a structured answer **only** from those passages. Citations (document, publisher, page) come from retrieval metadata, never from the model. Gold `row_id`s are included only if DuckDB verifies them. If the documents don't fully cover an on-topic question, it falls back to **Tavily web search** (`backend/agents/web_search.py`): official domains rank first, forums and social media are excluded, and only results the answer actually cites are returned as `web_sources` (URLs come from the search API, never the model). Off-topic questions are declined without searching. With no reliable evidence it says so (`source_pathway: insufficient`), and an LLM outage is reported as an outage, not as missing evidence. |
+| **Insight RAG Agent** (`backend/agents/insight_rag_agent.py`) | Grounded policy advisor | Retrieves the most relevant chunks from ChromaDB. A Gemini LLM (default `gemini-2.5-flash`) writes a structured answer **only** from those passages. Citations (document, publisher, page) come from retrieval metadata, never from the model. Gold `row_id`s are included only if DuckDB verifies them. If the documents don't fully cover an on-topic question, it falls back to **Tavily web search** (`backend/agents/web_search.py`): official domains rank first, forums and social media are excluded, and only results the answer actually cites are returned as `web_sources` (URLs come from the search API, never the model). Off-topic questions are declined without searching. With no reliable evidence it says so (`source_pathway: insufficient`), and an LLM outage is reported as an outage, not as missing evidence. |
 
 The agents are **custom Python** with typed payloads (`QualityDecisionLog`, `GroundedInsightPayload`). The stack does **not** use CrewAI, AutoGPT, BabyAGI, LangChain or LangGraph. **Prefect** orchestrates fetch → audit → warehouse → status.
 
@@ -168,9 +168,9 @@ Submission checklist: only items **used in this repository** are marked.
 | Category | Options from brief | Used in this project |
 | --- | --- | --- |
 | **Programming languages** | Python, R, Java, C++ | **Python 3.12** (deployed) / 3.13 (local), plus HTML/CSS/JavaScript for the dashboard |
-| **Frameworks / libraries** | TensorFlow, PyTorch, LangChain, pandas, numpy, LightGBM, scikit-learn, pydantic, pypdf | **pandas, numpy, LightGBM, pypdf, FastAPI, Groq SDK, requests/httpx**. Not TensorFlow, PyTorch or LangChain. |
+| **Frameworks / libraries** | TensorFlow, PyTorch, LangChain, pandas, numpy, LightGBM, scikit-learn, pydantic, pypdf | **pandas, numpy, LightGBM, pypdf, FastAPI, OpenAI SDK (Gemini OpenAI-compatible endpoint), requests/httpx**. Not TensorFlow, PyTorch or LangChain. |
 | **Databases** | PostgreSQL, MySQL, MongoDB | **DuckDB** (analytical warehouse) and **ChromaDB** (vector store). Not PostgreSQL, MySQL or MongoDB. |
-| **Cloud platforms** | AWS, Azure, Google Cloud Platform | None of the three. Hosting: **Render** (API) and **Vercel** (dashboard). LLM inference: **Groq**. |
+| **Cloud platforms** | AWS, Azure, Google Cloud Platform | None of the three. Hosting: **Render** (API) and **Vercel** (dashboard). LLM inference: **Google Gemini API**. |
 | **BI / visualization** | Power BI, Tableau, Streamlit | **Custom web dashboard** (SVG charts, three.js 3D heat map) and **Streamlit** |
 | **Orchestration** | Apache Airflow, Other | **Prefect** (not Airflow) |
 | **Agentic AI frameworks** | CrewAI, AutoGPT, BabyAGI, LangGraph | **Custom agents** (DQA + Insight RAG Agent). Not CrewAI, AutoGPT, BabyAGI or LangGraph. |
@@ -181,7 +181,7 @@ Submission checklist: only items **used in this repository** are marked.
 - [Open-Meteo Forecast API](https://api.open-meteo.com/v1/forecast): live observations for the Prefect flow, and forecast inputs for `/api/forecast`.
 - [NEPRA tariff schedule](https://nepra.org.pk/tariff/schedule): 2024 residential slabs (`data/raw/nepra_tariff_slabs_2024.csv`).
 - NEECA documents in `knowledge_base/`.
-- Groq API: LLM synthesis for the RAG agent (falls back to `openai/gpt-oss-20b` when the main model is rate-limited).
+- Google Gemini API: LLM synthesis for the RAG agent (falls back to `gemini-2.5-flash-lite` when the main model is rate-limited).
 - [Tavily Search API](https://tavily.com): web-search fallback for questions the knowledge base doesn't cover.
 
 ### Project API (`backend/api.py`)
@@ -279,9 +279,9 @@ cd Bijli-Insight_Pakistan
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1            # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt pytest prefect
-echo GROQ_API_KEY=your_key > .env       # optional: enables LLM answers in the advisor
+echo GEMINI_API_KEY=your_key > .env       # optional: enables LLM answers in the advisor
 echo TAVILY_API_KEY=your_key >> .env    # optional: enables the web-search fallback
-# optional tuning: RAG_MAX_DISTANCE (Chroma distance cutoff), WEB_MIN_SCORE (default 0.3), GROQ_FALLBACK_MODEL
+# optional tuning: RAG_MAX_DISTANCE (Chroma distance cutoff), WEB_MIN_SCORE (default 0.3), GEMINI_MODEL, GEMINI_FALLBACK_MODEL
 
 python -m backend.pipeline.generate_manifest
 python -m backend.pipeline.warehouse_pipeline

@@ -7,7 +7,7 @@ Purpose:
 Features:
     - Retrieves official energy-policy documents from ChromaDB.
     - Verifies supplied Gold row IDs against DuckDB.
-    - Uses Groq LLM to generate structured, evidence-grounded answers.
+    - Uses Gemini LLM to generate structured, evidence-grounded answers.
     - Returns source citations derived from retrieved metadata.
     - Avoids presenting unverified database IDs as verified evidence.
     - Supports fallback when evidence or the LLM is unavailable.
@@ -24,7 +24,7 @@ import logging
 import chromadb
 import duckdb
 from pypdf import PdfReader
-from groq import Groq, RateLimitError
+from openai import OpenAI, RateLimitError
 from dotenv import load_dotenv
 
 from backend.agents.web_search import search_web
@@ -226,7 +226,7 @@ class InsightAgentRAG:
         DuckDB Gold Row Verification
             |
             v
-        Groq LLM Synthesis
+        Gemini LLM Synthesis
             |
             v
         Markdown Normalization
@@ -264,10 +264,10 @@ class InsightAgentRAG:
                 ChromaDB policy collection.
 
             llm_client:
-                Optional injected Groq-compatible client.
+                Optional injected OpenAI-compatible client.
 
             model_name:
-                LLM model ID. Defaults to GROQ_MODEL.
+                LLM model ID. Defaults to GEMINI_MODEL.
 
             max_distance:
                 Optional maximum ChromaDB distance.
@@ -291,8 +291,8 @@ class InsightAgentRAG:
         self.model_name = (
             model_name
             or os.getenv(
-                "GROQ_MODEL",
-                "openai/gpt-oss-120b",
+                "GEMINI_MODEL",
+                "gemini-2.5-flash",
             )
         )
 
@@ -302,9 +302,11 @@ class InsightAgentRAG:
         # Initialize the LLM client.
         self.llm = llm_client
 
-        if self.llm is None and os.getenv("GROQ_API_KEY"):
-            self.llm = Groq(
-                api_key=os.getenv("GROQ_API_KEY")
+        if self.llm is None and os.getenv("GEMINI_API_KEY"):
+            # Gemini's OpenAI-compatible endpoint keeps the chat.completions interface.
+            self.llm = OpenAI(
+                api_key=os.getenv("GEMINI_API_KEY"),
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
             )
 
         # Initialize ChromaDB collection.
@@ -692,7 +694,7 @@ class InsightAgentRAG:
 
         if self.llm is None:
             logger.warning(
-                "Groq client is unavailable."
+                "Gemini client is unavailable."
             )
             return self._fallback()
 
@@ -1013,7 +1015,7 @@ relevant to the question.
             {"role": "user", "content": user_prompt},
         ]
         models = [self.model_name]
-        fallback_model = os.getenv("GROQ_FALLBACK_MODEL", "openai/gpt-oss-20b")
+        fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash-lite")
         if fallback_model and fallback_model != self.model_name:
             models.append(fallback_model)
 
@@ -1023,11 +1025,13 @@ relevant to the question.
                     model=model,
                     messages=messages,
                     temperature=0.1,
-                    max_completion_tokens=900,
+                    max_tokens=900,
+                    # 2.5 models think by default and that spends the token budget; turn it off.
+                    **({"reasoning_effort": "none"} if model.startswith("gemini-2.5") else {}),
                 )
                 return (response.choices[0].message.content or "").strip()
             except RateLimitError:
-                # Groq quotas are per model, so the fallback may still have room.
+                # Gemini quotas are per model, so the fallback may still have room.
                 if attempt == len(models) - 1:
                     raise
                 logger.warning("%s rate-limited; retrying on %s.", model, models[-1])

@@ -47,7 +47,7 @@ def make_agent(llm_client=None, db_connection=None):
 
 
 def make_llm_client(content="### Direct Answer\nTest answer."):
-    """Create a mocked Groq-compatible chat completion client."""
+    """Create a mocked OpenAI-compatible chat completion client."""
 
     client = MagicMock()
 
@@ -124,7 +124,7 @@ def test_rag_missing_llm_triggers_fallback():
     """Without an LLM, the agent must fail closed."""
 
     agent = make_agent(llm_client=None)
-    agent.llm = None  # Isolate from environment-loaded GROQ_API_KEY
+    agent.llm = None  # Isolate from environment-loaded GEMINI_API_KEY
 
     response = agent.synthesize_verified_advice(
         user_query="Explain the policy.",
@@ -338,7 +338,7 @@ def test_rag_llm_exception_triggers_fallback():
     llm = make_llm_client()
 
     llm.chat.completions.create.side_effect = RuntimeError(
-        "Simulated Groq API failure"
+        "Simulated Gemini API failure"
     )
 
     agent = make_agent(llm_client=llm)
@@ -546,7 +546,7 @@ WEB_RESULTS = [
 
 
 def make_sequenced_llm(*contents):
-    """Mocked Groq client returning each content in turn."""
+    """Mocked LLM client returning each content in turn."""
 
     client = MagicMock()
     completions = []
@@ -710,15 +710,15 @@ def test_fullwidth_citations_are_normalised(monkeypatch):
 
 def _rate_limit_error():
     import httpx
-    from groq import RateLimitError
-    request = httpx.Request("POST", "https://api.groq.com")
+    from openai import RateLimitError
+    request = httpx.Request("POST", "https://generativelanguage.googleapis.com")
     return RateLimitError(
         "rate limited", response=httpx.Response(429, request=request), body=None
     )
 
 
 def test_rate_limit_retries_on_fallback_model(monkeypatch):
-    monkeypatch.setenv("GROQ_FALLBACK_MODEL", "small-model")
+    monkeypatch.setenv("GEMINI_FALLBACK_MODEL", "small-model")
     llm = make_llm_client("### Direct Answer\nCovered.\nCOVERAGE: FULL")
     completion = llm.chat.completions.create.return_value
     llm.chat.completions.create.side_effect = [_rate_limit_error(), completion]
