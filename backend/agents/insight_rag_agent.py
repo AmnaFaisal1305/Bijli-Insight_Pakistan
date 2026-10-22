@@ -292,7 +292,7 @@ class InsightAgentRAG:
             model_name
             or os.getenv(
                 "GEMINI_MODEL",
-                "gemini-2.5-flash",
+                "gemini-3.8-flash",
             )
         )
 
@@ -1015,7 +1015,7 @@ relevant to the question.
             {"role": "user", "content": user_prompt},
         ]
         models = [self.model_name]
-        fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash-lite")
+        fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite")
         if fallback_model and fallback_model != self.model_name:
             models.append(fallback_model)
 
@@ -1025,9 +1025,9 @@ relevant to the question.
                     model=model,
                     messages=messages,
                     temperature=0.1,
-                    max_tokens=900,
-                    # 2.5 models think by default and that spends the token budget; turn it off.
-                    **({"reasoning_effort": "none"} if model.startswith("gemini-2.5") else {}),
+                    # Gemini 3 thinking can't be disabled and counts against max_tokens; "minimal" is rejected.
+                    reasoning_effort="low",
+                    max_tokens=4096,
                 )
                 return (response.choices[0].message.content or "").strip()
             except RateLimitError:
