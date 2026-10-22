@@ -69,21 +69,36 @@ async def forecast(city: str = "karachi"):
         f"&hourly=temperature_2m,relative_humidity_2m,wind_speed_10m"
         f"&forecast_days=7&timezone=Asia%2FKarachi"
     )
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(url)
-    hourly   = r.json()["hourly"]
-    temps    = hourly["temperature_2m"][:168]
-    humidity = hourly["relative_humidity_2m"][:168]
-    wind     = hourly["wind_speed_10m"][:168]
-
     conn = _conn()
     lag_rows = conn.execute(
-        "SELECT temperature_c FROM gold_weather_features "
+        "SELECT temperature_c, humidity_pct, wind_speed_kmh FROM gold_weather_features "
         "WHERE filename = ? ORDER BY timestamp_utc DESC LIMIT 200",
         [cfg["file"]]
     ).fetchall()
     conn.close()
     hist = [row[0] for row in reversed(lag_rows)]  # oldest first
+
+    hourly = None
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            for _ in range(2):
+                hourly = (await client.get(url)).json().get("hourly")
+                if hourly:
+                    break
+    except (httpx.HTTPError, ValueError):
+        pass
+    if hourly:
+        source   = "open-meteo"
+        temps    = hourly["temperature_2m"][:168]
+        humidity = hourly["relative_humidity_2m"][:168]
+        wind     = hourly["wind_speed_10m"][:168]
+    else:
+        # Open-Meteo rate-limits Render's shared IP; reuse the last observed week as weather inputs
+        source   = "warehouse"
+        week     = list(reversed(lag_rows[:168]))
+        temps    = [float(r[0]) for r in week]
+        humidity = [float(r[1]) for r in week]
+        wind     = [float(r[2]) for r in week]
 
     rows = []
     for i in range(168):
@@ -109,6 +124,7 @@ async def forecast(city: str = "karachi"):
         "lo": [round(v, 2) for v in preds["q_low"].tolist()],
         "md": [round(v, 2) for v in preds["q_mid"].tolist()],
         "hi": [round(v, 2) for v in preds["q_high"].tolist()],
+        "source": source,
     }
 
 
