@@ -457,7 +457,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
  <div class="blk">
   <div class="bh"><div><h2>Data explorer</h2><p class="sub">The warehouse rows behind the forecasts for <b class="cn">Karachi (K-Electric)</b>.</p></div><span class="ur" lang="ur" dir="rtl">ڈیٹا گودام</span></div>
   <div class="ctl">
-   <label><span class="lab">Table</span><select id="tbl"><option>gold_weather_features</option><option>silver_weather_clean</option><option>raw_open_meteo</option></select></label>
+   <label><span class="lab">Table</span><select id="tbl"><option>gold_weather_features</option><option>silver_weather_clean</option><option>raw_open_meteo</option><option value="quality_log">quality_log.json (DQA audit)</option></select></label>
    <label><span class="lab">Rows · <b class="num" id="limVal">25</b></span><input type="range" id="lim" min="5" max="250" value="25"></label>
    <div class="seg" id="seg" role="group" aria-label="View"><button aria-pressed="true" data-m="t">Table</button><button aria-pressed="false" data-m="c">Readings</button></div>
   </div>
@@ -521,8 +521,23 @@ $('#city').onchange=e=>{$$('.cn').forEach(n=>n.textContent=e.target.value);setRe
 $('#theme').onclick=()=>{const d=matchMedia('(prefers-color-scheme:dark)').matches,cur=document.documentElement.dataset.theme||(d?'dark':'light');document.documentElement.dataset.theme=cur==='dark'?'light':'dark';if(window.F){draw();g3(true)}};
 
 // data explorer
+const WHEAD='<tr><th>Time (PKT)</th><th>Temp °C</th><th>Humidity %</th><th>Wind km/h</th></tr>';
+async function loadQualityLog(limit){
+ $('#v-warehouse thead').innerHTML='<tr><th>Time (PKT)</th><th>Action</th><th>Column · rows</th><th>Rationale</th></tr>';
+ try{
+  const log=await (await fetch(`${API}/api/quality_log?limit=${limit}`)).json();
+  const fmt=ts=>new Date(ts).toLocaleString('en-GB',{timeZone:TZ,day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
+  $('#wrows').innerHTML=log.length?log.map(r=>`<tr><td class="m">${fmt(r.timestamp_utc)}</td><td><b>${esc(r.action_taken)}</b></td><td class="m">${esc(r.column_name)} · ${+r.affected_rows_count}</td><td>${esc(r.rationale)}</td></tr>`).join('')
+   :'<tr><td colspan="4">No decisions logged yet: every incoming record so far passed the FIX, FILL and FLAG checks unchanged.</td></tr>';
+  $('#cg').innerHTML=log.map(r=>`<div><small>${fmt(r.timestamp_utc)}</small><span class="num">${esc(r.action_taken)}</span><small>${esc(r.column_name)} · ${esc(r.rationale)}</small></div>`).join('');
+  const n=a=>log.filter(r=>r.action_taken===a).length;
+  $('#wkpi').innerHTML=[['Decisions shown',log.length],['Fix',n('FIX')],['Fill',n('FILL')],['Flag',n('FLAG')]].map(k=>`<div><small>${k[0]}</small><span class="num">${k[1]}</span></div>`).join('');
+ }catch(e){$('#wrows').innerHTML='<tr><td colspan="4">Audit log unreachable. The backend may be waking up; try again in a minute.</td></tr>'}
+}
 async function loadWeather(){
  const city=$('#city').value,table=$('#tbl').value,limit=$('#lim').value;$('#limVal').textContent=limit;
+ if(table==='quality_log')return loadQualityLog(limit);
+ $('#v-warehouse thead').innerHTML=WHEAD;
  try{
   const data=await (await fetch(`${API}/api/weather?city=${encodeURIComponent(city)}&table=${encodeURIComponent(table)}&limit=${limit}`)).json();
   let out='',cards='';

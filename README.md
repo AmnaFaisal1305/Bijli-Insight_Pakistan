@@ -105,7 +105,7 @@ Open-Meteo API  →  data/raw/*.csv  →  SHA-256 manifest
 | Agent | Role | How it decides |
 | --- | --- | --- |
 | **Data Quality Agent** (`backend/agents/data_quality_agent.py`) | Autonomous remediation | **FIX** object→numeric casts. **FILL** linear interpolation for gaps of at most two hours (`is_imputed`). **FLAG** temperatures outside −10 °C to 55 °C (`is_anomalous`) without rewriting the measurement. Every action is appended to `data/quality_log.json`. |
-| **Insight RAG Agent** (`backend/agents/insight_rag_agent.py`) | Grounded policy advisor | Retrieves the most relevant chunks from ChromaDB. A Gemini LLM (default `gemini-2.5-flash`) writes a structured answer **only** from those passages. Citations (document, publisher, page) come from retrieval metadata, never from the model. Gold `row_id`s are included only if DuckDB verifies them. If the documents don't fully cover an on-topic question, it falls back to **Tavily web search** (`backend/agents/web_search.py`): official domains rank first, forums and social media are excluded, and only results the answer actually cites are returned as `web_sources` (URLs come from the search API, never the model). Off-topic questions are declined without searching. With no reliable evidence it says so (`source_pathway: insufficient`), and an LLM outage is reported as an outage, not as missing evidence. |
+| **Insight RAG Agent** (`backend/agents/insight_rag_agent.py`) | Grounded policy advisor | Retrieves the most relevant chunks from ChromaDB. A Gemini LLM (default `gemini-3.8-flash`) writes a structured answer **only** from those passages. Citations (document, publisher, page) come from retrieval metadata, never from the model. Gold `row_id`s are included only if DuckDB verifies them. If the documents don't fully cover an on-topic question, it falls back to **Tavily web search** (`backend/agents/web_search.py`): official domains rank first, forums and social media are excluded, and only results the answer actually cites are returned as `web_sources` (URLs come from the search API, never the model). Off-topic questions are declined without searching. With no reliable evidence it says so (`source_pathway: insufficient`), and an LLM outage is reported as an outage, not as missing evidence. |
 
 The agents are **custom Python** with typed payloads (`QualityDecisionLog`, `GroundedInsightPayload`). The stack does **not** use CrewAI, AutoGPT, BabyAGI, LangChain or LangGraph. **Prefect** orchestrates fetch → audit → warehouse → status.
 
@@ -181,7 +181,7 @@ Submission checklist: only items **used in this repository** are marked.
 - [Open-Meteo Forecast API](https://api.open-meteo.com/v1/forecast): live observations for the Prefect flow, and forecast inputs for `/api/forecast`.
 - [NEPRA tariff schedule](https://nepra.org.pk/tariff/schedule): 2024 residential slabs (`data/raw/nepra_tariff_slabs_2024.csv`).
 - NEECA documents in `knowledge_base/`.
-- Google Gemini API: LLM synthesis for the RAG agent (falls back to `gemini-2.5-flash-lite` when the main model is rate-limited).
+- Google Gemini API: LLM synthesis for the RAG agent (falls back to `gemini-3.5-flash-lite` when the main model is rate-limited).
 - [Tavily Search API](https://tavily.com): web-search fallback for questions the knowledge base doesn't cover.
 
 ### Project API (`backend/api.py`)

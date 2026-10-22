@@ -33,6 +33,7 @@ DB_PATH    = Path("data/warehouse.duckdb")
 MODELS_DIR = Path("models")
 CHROMA_DIR = Path("data/chroma_db")
 RAW_DIR    = Path("data/raw")
+FORECAST_INPUTS = Path("data/forecast_inputs")
 
 CITY_MAP = {
     "karachi":   {"file": "open-meteo-24.85N66.99E7m.csv",   "lat": 24.85, "lon": 66.99},
@@ -87,13 +88,24 @@ async def forecast(city: str = "karachi"):
                     break
     except (httpx.HTTPError, ValueError):
         pass
+    snapshot = FORECAST_INPUTS / f"{cfg['file']}.json"
+    if not hourly and snapshot.exists():
+        # Open-Meteo rate-limits Render's shared IP; use the latest committed 16-day Open-Meteo forecast,
+        # starting from the current PKT hour so a snapshot from an earlier day stays aligned.
+        snap  = json.loads(snapshot.read_text(encoding="utf-8"))
+        now   = pd.Timestamp.now("Asia/Karachi").strftime("%Y-%m-%dT%H:00")
+        start = next((i for i, t in enumerate(snap["time"]) if t >= now), len(snap["time"]))
+        if len(snap["time"]) - start >= 168:
+            hourly = {k: v[start:] for k, v in snap.items()}
+            source = "open-meteo-snapshot"
+    elif hourly:
+        source = "open-meteo"
     if hourly:
-        source   = "open-meteo"
         temps    = hourly["temperature_2m"][:168]
         humidity = hourly["relative_humidity_2m"][:168]
         wind     = hourly["wind_speed_10m"][:168]
     else:
-        # Open-Meteo rate-limits Render's shared IP; reuse the last observed week as weather inputs
+        # no forecast at all: reuse the last observed week as weather inputs
         source   = "warehouse"
         week     = list(reversed(lag_rows[:168]))
         temps    = [float(r[0]) for r in week]
@@ -185,6 +197,13 @@ def status():
     conn.close()
     # No pipeline run recorded yet: report that honestly instead of placeholder metrics.
     return {"status": "NO_RUN_YET", "active_records_count": total}
+
+
+@app.get("/api/quality_log")
+def quality_log(limit: int = 250):
+    log_file = Path("data/quality_log.json")
+    records = json.loads(log_file.read_text(encoding="utf-8")) if log_file.exists() else []
+    return records[::-1][:limit]  # newest first
 
 
 @app.get("/api/tariffs")
